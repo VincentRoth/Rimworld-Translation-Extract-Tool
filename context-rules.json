@@ -1,0 +1,164 @@
+{
+  // Règles évaluées dans l'ordre : la première qui correspond gagne. Du plus spécifique au plus générique.
+  // defRules : "def" = nom de type de def (ou d'une classe parente), "field" = nom du champ ou chemin (* = joker).
+  //   "max"   = longueur FR visée (caractères) ; "short" = texte court : limite auto ≈ 1.3 x EN.
+  "defRules": [
+    // ---------- Statistiques (panneau Exosuit, fiche d'objet, panneaux de stats) ----------
+    { "def": "StatDef", "field": "label", "context": "StatDef : nom de statistique affiché à gauche de la valeur (fiche d'objet, panneaux de stats, onglets du châssis/équipement) - la valeur est sur la même ligne : rester COURT", "short": true, "max": 22 },
+    { "def": "StatDef", "field": "labelForFullStatList", "context": "StatDef : variante du nom utilisée dans la liste complète des stats (fiche d'info)", "short": true },
+    { "def": "StatDef", "field": "formatString", "context": "StatDef : format d'affichage de la valeur (garder {0} et l'unité courte)", "short": true },
+    { "def": "StatDef", "field": "description", "context": "StatDef : infobulle de la statistique (survol), longueur libre" },
+    { "def": "StatCategoryDef", "field": "label", "context": "Titre de catégorie de stats (en-tête dans la fiche d'info)", "short": true },
+    { "def": "StatPart*", "field": "*", "context": "Texte de calcul de stat (infobulle détaillant la valeur)" },
+
+    // ---------- Objets / bâtiments ----------
+    { "def": "ThingDef", "field": "label", "context": "ThingDef : nom de l'objet/bâtiment/créature (menu Architecte, inventaire, titre de sélection, infobulles) - minuscule en anglais, pas de point", "short": true },
+    { "def": "ThingDef", "field": "labelPlural", "context": "ThingDef : pluriel du nom (piles, listes, messages)", "short": true },
+    { "def": "ThingDef", "field": "description", "context": "ThingDef : description (fiche d'info, infobulle du menu Architecte) - longueur libre" },
+    { "def": "ThingDef", "field": "stuffProps.stuffAdjective", "context": "Adjectif de matériau placé devant le nom (ex. « en bois ») - très court", "short": true },
+    { "def": "ThingDef", "field": "tools.*.label", "context": "Nom d'une attaque de mêlée (journal de combat, fiche d'info) - très court", "short": true },
+    { "def": "ThingDef", "field": "tools.*.labelNoLocation", "context": "Nom d'attaque sans partie du corps (journal de combat)", "short": true },
+    { "def": "ThingDef", "field": "verbs.*.label", "context": "Nom d'attaque à distance / capacité (fiche d'info, journal)", "short": true },
+    { "def": "ThingDef", "field": "comps.*.fuelLabel", "context": "Libellé de carburant (jauge/infobulle du bâtiment) - court", "short": true },
+    { "def": "ThingDef", "field": "comps.*.fuelGizmoLabel", "context": "Libellé de la barre de carburant (bouton/jauge du bâtiment) - court", "short": true },
+    { "def": "ThingDef", "field": "comps.*", "context": "Texte d'un composant d'objet (jauge, bouton, message ou texte d'inspection du bâtiment)" },
+    { "def": "ThingDef", "field": "*", "context": "ThingDef : texte associé à l'objet" },
+
+    // ---------- Terrain, plantes, ressources ----------
+    { "def": "TerrainDef", "field": "label", "context": "TerrainDef : nom de sol (menu Architecte, inspection)", "short": true },
+    { "def": "TerrainDef", "field": "description", "context": "TerrainDef : description du sol (infobulle Architecte)" },
+    { "def": "ThingCategoryDef", "field": "label", "context": "Catégorie d'objets (filtres de stockage, d'ordres de fabrication) - court", "short": true },
+    { "def": "DesignationCategoryDef", "field": "label", "context": "Onglet du menu Architecte (bouton) - très court", "short": true, "max": 16 },
+    { "def": "DesignationCategoryDef", "field": "description", "context": "Infobulle de l'onglet Architecte" },
+
+    // ---------- Fabrication, recettes, travail ----------
+    { "def": "RecipeDef", "field": "label", "context": "RecipeDef : nom de l'ordre de fabrication / opération chirurgicale (liste des ordres, menu chirurgie)", "short": true },
+    { "def": "RecipeDef", "field": "jobString", "context": "RecipeDef : texte d'activité du colon pendant la tâche (barre d'info « {0} » = cible) - verbe à l'infinitif/gérondif" },
+    { "def": "RecipeDef", "field": "description", "context": "RecipeDef : infobulle de l'ordre de fabrication" },
+    { "def": "RecipeDef", "field": "*Message", "context": "Message affiché à l'écran après l'opération" },
+    { "def": "WorkTypeDef", "field": "labelShort", "context": "WorkTypeDef : en-tête de colonne de l'onglet Travail (TRÈS court, ~8-10 car.)", "short": true, "max": 10 },
+    { "def": "WorkTypeDef", "field": "pawnLabel", "context": "WorkTypeDef : intitulé du métier (ex. « Artiste » ), fiche du colon", "short": true },
+    { "def": "WorkTypeDef", "field": "gerundLabel", "context": "WorkTypeDef : action en cours dans la barre d'info (gérondif)", "short": true },
+    { "def": "WorkTypeDef", "field": "verb", "context": "WorkTypeDef : verbe d'activité (« Faire de l'art à »)" },
+    { "def": "WorkTypeDef", "field": "description", "context": "WorkTypeDef : infobulle de l'en-tête de colonne (onglet Travail)" },
+    { "def": "WorkGiverDef", "field": "label", "context": "WorkGiverDef : libellé de la tâche (liste de travail)", "short": true },
+    { "def": "WorkGiverDef", "field": "verb", "context": "WorkGiverDef : verbe affiché à côté de la cible" },
+    { "def": "WorkGiverDef", "field": "gerund", "context": "WorkGiverDef : action en cours (gérondif), barre d'info du colon" },
+    { "def": "JobDef", "field": "reportString", "context": "JobDef : activité actuelle du colon dans la barre d'info/fiche (« {TargetA} » = cible à conserver)" },
+    { "def": "DutyDef", "field": "*", "context": "Texte d'activité de groupe" },
+
+    // ---------- Santé ----------
+    { "def": "HediffDef", "field": "label", "context": "HediffDef : nom de l'affection/prothèse (onglet Santé, infobulle de la partie du corps)", "short": true },
+    { "def": "HediffDef", "field": "labelNoun", "context": "HediffDef : nom commun (« une {0} », lettre/journal)", "short": true },
+    { "def": "HediffDef", "field": "labelNounPretty", "context": "HediffDef : nom joli (journal de soins)", "short": true },
+    { "def": "HediffDef", "field": "description", "context": "HediffDef : description (infobulle de l'onglet Santé)" },
+    { "def": "HediffDef", "field": "stages.*.label", "context": "HediffDef : préfixe de gravité devant le nom (onglet Santé) - très court", "short": true },
+    { "def": "HediffDef", "field": "stages.*.*", "context": "HediffDef : texte d'un stade de gravité (infobulle Santé / lettre)" },
+    { "def": "HediffDef", "field": "comps.*", "context": "HediffDef : texte d'un composant (soins, permanence, lettres)" },
+    { "def": "HediffDef", "field": "*", "context": "HediffDef : texte d'affection (onglet Santé, lettres)" },
+    { "def": "BodyPartDef", "field": "label", "context": "BodyPartDef : nom de partie du corps (onglet Santé, journal)", "short": true },
+    { "def": "BodyPartDef", "field": "labelShort", "context": "BodyPartDef : nom court de partie du corps", "short": true },
+    { "def": "BodyDef", "field": "*", "context": "BodyDef : libellé personnalisé d'une partie du corps (onglet Santé)", "short": true },
+
+    // ---------- Pensées / traits / besoins ----------
+    { "def": "ThoughtDef", "field": "stages.*.label", "context": "ThoughtDef : nom de la pensée dans l'onglet Besoins (liste d'humeur) - court", "short": true },
+    { "def": "ThoughtDef", "field": "stages.*.labelSocial", "context": "ThoughtDef : nom de l'opinion sociale (onglet Social)", "short": true },
+    { "def": "ThoughtDef", "field": "stages.*.description", "context": "ThoughtDef : infobulle de la pensée (monologue du colon, 1re personne)" },
+    { "def": "TraitDef", "field": "degreeDatas.*.label", "context": "TraitDef : nom du trait (fiche du colon, bio) - court", "short": true },
+    { "def": "TraitDef", "field": "degreeDatas.*.description", "context": "TraitDef : infobulle du trait ({PAWN_nameDef} etc. à conserver)" },
+    { "def": "NeedDef", "field": "label", "context": "NeedDef : nom du besoin (onglet Besoins, barre) - court", "short": true },
+    { "def": "SkillDef", "field": "label", "context": "SkillDef : nom de compétence (fiche du colon)", "short": true },
+    { "def": "SkillDef", "field": "skillLabel", "context": "SkillDef : nom de compétence court", "short": true },
+    { "def": "BackstoryDef", "field": "*", "context": "BackstoryDef : titre/description d'historique (fiche du colon)" },
+    { "def": "XenotypeDef", "field": "*", "context": "XenotypeDef : texte de xénotype (création de colon, fiche)" },
+    { "def": "GeneDef", "field": "label", "context": "GeneDef : nom de gène (éditeur de gènes, fiche) - court", "short": true },
+    { "def": "GeneDef", "field": "description", "context": "GeneDef : infobulle du gène" },
+    { "def": "GeneDef", "field": "labelShortAdj", "context": "GeneDef : adjectif court du gène", "short": true },
+
+    // ---------- Capacités / psychisme ----------
+    { "def": "AbilityDef", "field": "label", "context": "AbilityDef : nom de la capacité (bouton de la barre de commandes + titre de l'infobulle) - TRÈS court", "short": true, "max": 22 },
+    { "def": "AbilityDef", "field": "description", "context": "AbilityDef : infobulle du bouton de capacité" },
+    { "def": "AbilityDef", "field": "*", "context": "AbilityDef : texte de capacité (confirmation, journal, message)" },
+    { "def": "PsycastDef", "field": "*", "context": "Texte de psycast" },
+
+    // ---------- Recherche ----------
+    { "def": "ResearchProjectDef", "field": "label", "context": "ResearchProjectDef : nom du projet (arbre de recherche : bouton à largeur limitée) - court", "short": true, "max": 26 },
+    { "def": "ResearchProjectDef", "field": "description", "context": "ResearchProjectDef : description (panneau de droite de l'onglet Recherche)" },
+    { "def": "ResearchTabDef", "field": "label", "context": "Onglet de recherche (bouton)", "short": true },
+
+    // ---------- Événements, lettres, états mentaux ----------
+    { "def": "IncidentDef", "field": "letterLabel", "context": "IncidentDef : titre de la lettre (icône d'alerte à droite de l'écran) - court", "short": true },
+    { "def": "IncidentDef", "field": "letterText", "context": "IncidentDef : corps de la lettre (conserver {0}, [PAWN_label] etc.)" },
+    { "def": "IncidentDef", "field": "*", "context": "IncidentDef : texte d'événement" },
+    { "def": "MentalStateDef", "field": "*Letter*", "context": "MentalStateDef : lettre d'état mental (conserver les placeholders)" },
+    { "def": "MentalStateDef", "field": "*", "context": "MentalStateDef : texte d'état mental (barre d'info, journal)" },
+    { "def": "GameConditionDef", "field": "label", "context": "GameConditionDef : nom de condition (bandeau en haut à droite)", "short": true },
+    { "def": "GameConditionDef", "field": "*", "context": "GameConditionDef : texte de condition météo/événement" },
+    { "def": "QuestScriptDef", "field": "*", "context": "QuestScriptDef : règles de génération de texte de quête (grammaire à conserver)" },
+    { "def": "RulePackDef", "field": "*", "context": "RulePackDef : règles de grammaire (journal de jeu, noms, descriptions d'art) - conserver les [mots-clés] et {0}" },
+
+    // ---------- Factions, races, animaux ----------
+    { "def": "FactionDef", "field": "label", "context": "FactionDef : nom du type de faction (liste des factions)", "short": true },
+    { "def": "FactionDef", "field": "pawnSingular", "context": "FactionDef : membre (singulier)", "short": true },
+    { "def": "FactionDef", "field": "pawnsPlural", "context": "FactionDef : membres (pluriel)", "short": true },
+    { "def": "FactionDef", "field": "*", "context": "FactionDef : texte de faction" },
+    { "def": "PawnKindDef", "field": "label", "context": "PawnKindDef : nom du type de personnage/animal (infobulle, liste de zone)", "short": true },
+    { "def": "PawnKindDef", "field": "*", "context": "PawnKindDef : variante de nom (pluriel/genre)", "short": true },
+    { "def": "LifeStageDef", "field": "*", "context": "LifeStageDef : nom de stade de vie", "short": true },
+    { "def": "MemeDef", "field": "*", "context": "MemeDef : texte de mème (idéologie)" },
+    { "def": "PreceptDef", "field": "*", "context": "PreceptDef : texte de précepte (idéologie)" },
+    { "def": "RitualPatternDef", "field": "*", "context": "Texte de rituel" },
+    { "def": "PawnRelationDef", "field": "*", "context": "PawnRelationDef : nom de relation (onglet Social)", "short": true },
+
+    // ---------- Interface ----------
+    { "def": "MainButtonDef", "field": "label", "context": "MainButtonDef : bouton de la barre du bas (très court)", "short": true, "max": 14 },
+    { "def": "MainButtonDef", "field": "description", "context": "MainButtonDef : infobulle du bouton principal" },
+    { "def": "KeyBindingDef", "field": "label", "context": "KeyBindingDef : nom de raccourci clavier (menu Options > Raccourcis)", "short": true },
+    { "def": "KeyBindingCategoryDef", "field": "*", "context": "Catégorie de raccourcis (menu Options)" },
+    { "def": "DamageDef", "field": "*", "context": "DamageDef : texte de type de dégât (journal, mort)" },
+
+    // ---------- Génériques ----------
+    { "def": "*", "field": "labelShort", "context": "Version abrégée du nom (utilisée quand la place manque) - très court", "short": true },
+    { "def": "*", "field": "labelPlural", "context": "Pluriel du nom", "short": true },
+    { "def": "*", "field": "label", "context": "Nom/libellé (listes, infobulles, titres)", "short": true },
+    { "def": "*", "field": "description", "context": "Description / infobulle - longueur libre" },
+    { "def": "*", "field": "letterLabel", "context": "Titre de lettre (court)", "short": true },
+    { "def": "*", "field": "letterText", "context": "Corps de lettre (conserver les placeholders)" },
+    { "def": "*", "field": "jobString", "context": "Texte d'activité du colon dans la barre d'info" },
+    { "def": "*", "field": "reportString", "context": "Texte d'activité du colon dans la barre d'info" },
+    { "def": "*", "field": "verb", "context": "Verbe d'action" },
+    { "def": "*", "field": "gerund", "context": "Action en cours (gérondif)" },
+    { "def": "*", "field": "*Message", "context": "Message affiché en haut à gauche de l'écran" },
+    { "def": "*", "field": "*Tip", "context": "Infobulle" },
+    { "def": "*", "field": "*Tooltip", "context": "Infobulle" },
+    { "def": "*", "field": "*Label", "context": "Libellé (interface)", "short": true },
+    { "def": "*", "field": "*Desc", "context": "Description" },
+    { "def": "*", "field": "*.label", "context": "Libellé d'un sous-élément de la def (liste, onglet ou infobulle) - court", "short": true },
+    { "def": "*", "field": "*.description", "context": "Description d'un sous-élément de la def (infobulle)" }
+  ],
+
+  // keyedRules : "field" = motif sur le NOM de la clé Keyed (insensible à la casse, * = joker)
+  "keyedRules": [
+    { "field": "*Button*", "context": "Texte de bouton - TRÈS court", "short": true },
+    { "field": "*Btn*", "context": "Texte de bouton - très court", "short": true },
+    { "field": "*Gizmo*", "context": "Bouton/gizmo de la barre de commandes - très court", "short": true },
+    { "field": "*Command*", "context": "Bouton/gizmo de la barre de commandes - très court", "short": true },
+    { "field": "*Tooltip*", "context": "Infobulle" },
+    { "field": "*Tip", "context": "Infobulle" },
+    { "field": "*Desc*", "context": "Description / infobulle" },
+    { "field": "*Title*", "context": "Titre de fenêtre ou d'en-tête", "short": true },
+    { "field": "*Header*", "context": "En-tête de section", "short": true },
+    { "field": "*Label*", "context": "Libellé d'interface (à côté d'une valeur/un champ) - court", "short": true },
+    { "field": "*Letter*", "context": "Lettre (alerte à droite de l'écran)" },
+    { "field": "*Msg*", "context": "Message affiché en haut à gauche" },
+    { "field": "*Message*", "context": "Message affiché en haut à gauche" },
+    { "field": "*Confirm*", "context": "Dialogue de confirmation" },
+    { "field": "*Dialog*", "context": "Texte de dialogue" },
+    { "field": "*Setting*", "context": "Option dans la fenêtre des paramètres du mod" },
+    { "field": "*Option*", "context": "Option / entrée de menu" },
+    { "field": "*Menu*", "context": "Entrée de menu contextuel" },
+    { "field": "*Alert*", "context": "Alerte (à gauche, sous l'écran)" },
+    { "field": "*Stat*", "context": "Statistique affichée avec une valeur - court", "short": true },
+    { "field": "*Inspect*", "context": "Texte d'inspection (panneau d'info du bas)" }
+  ]
+}

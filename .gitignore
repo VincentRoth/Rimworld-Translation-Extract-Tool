@@ -1,0 +1,10 @@
+# Build
+bin/
+obj/
+.vs/
+*.user
+*.pdb
+
+# Extraction output (regenerable, ~360 MB). Finished translations live in the
+# Dibolic_FrenchModsPack repository (see Sync-Translations.ps1).
+out/

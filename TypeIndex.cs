@@ -1,0 +1,324 @@
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
+
+namespace TranslationExtractor;
+
+public sealed class FieldInfoEx
+{
+    public FieldInfo Field = null!;
+    public bool MustTranslate, NoTranslate;
+    public int? HandlePriority;   // null = pas un handle
+}
+
+/// <summary>Index de types du jeu et des mods, chargés par réflexion sans exécution (MetadataLoadContext).</summary>
+public sealed class TypeIndex : IDisposable
+{
+    readonly MetadataLoadContext mlc;
+    readonly Dictionary<string, List<Type>> bySimple = new();
+    readonly Dictionary<string, Type> byFull = new();
+    readonly Dictionary<Type, Dictionary<string, FieldInfoEx>> fieldCache = new();
+    readonly Dictionary<Type, List<FieldInfoEx>> handleCache = new();
+    readonly Report rep;
+
+    static readonly string[] CorePrefixes = { "Verse", "RimWorld" };
+
+    public TypeIndex(string managedDir, IEnumerable<string> modDlls, Report rep)
+    {
+        this.rep = rep;
+        var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Directory.GetFiles(managedDir, "*.dll")) paths[Path.GetFileName(f)] = f;
+        var modPaths = new List<string>();
+        foreach (var f in modDlls)
+        {
+            var n = Path.GetFileName(f);
+            if (paths.ContainsKey(n)) continue;
+            paths[n] = f; modPaths.Add(f);
+        }
+        var resolver = new PathAssemblyResolver(paths.Values);
+        mlc = new MetadataLoadContext(resolver, "mscorlib");
+
+        var toIndex = new List<string>
+        {
+            Path.Combine(managedDir, "Assembly-CSharp.dll"),
+            Path.Combine(managedDir, "Assembly-CSharp-firstpass.dll"),
+        };
+        toIndex.AddRange(modPaths);
+        foreach (var p in toIndex)
+        {
+            if (!File.Exists(p)) continue;
+            try
+            {
+                var asm = mlc.LoadFromAssemblyPath(p);
+                Type?[] types;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException e) { types = e.Types; }
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    var full = t.FullName ?? t.Name;
+                    byFull.TryAdd(full, t);
+                    if (!bySimple.TryGetValue(t.Name, out var l)) bySimple[t.Name] = l = new();
+                    l.Add(t);
+                }
+            }
+            catch (Exception ex) { rep.Warn($"DLL non indexée {Path.GetFileName(p)}: {ex.Message}"); }
+        }
+    }
+
+    public Type? Resolve(string name)
+    {
+        if (byFull.TryGetValue(name, out var t)) return t;
+        if (!bySimple.TryGetValue(name, out var l))
+        {
+            var k = bySimple.Keys.FirstOrDefault(x => x.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (k == null) return null;
+            l = bySimple[k];
+        }
+        return l.FirstOrDefault(x => CorePrefixes.Any(p => (x.Namespace ?? "").StartsWith(p))) ?? l[0];
+    }
+
+    public static bool IsDef(Type t)
+    {
+        for (var b = t; b != null; b = SafeBase(b))
+            if (b.FullName == "Verse.Def") return true;
+        return false;
+    }
+
+    public static Type? SafeBase(Type t)
+    {
+        try { return t.BaseType; } catch { return null; }
+    }
+
+    public static string FolderName(Type t)
+    {
+        var ns = t.Namespace ?? "";
+        if (ns == "" || ns.StartsWith("Verse") || ns.StartsWith("RimWorld"))
+            return t.Name;
+        return t.FullName ?? t.Name;
+    }
+
+    public static IEnumerable<string> BaseChainNames(Type t)
+    {
+        for (var b = t; b != null; b = SafeBase(b)) yield return b.Name;
+    }
+
+    static string? AttrArgString(CustomAttributeData a) =>
+        a.ConstructorArguments.Count > 0 ? a.ConstructorArguments[0].Value as string : null;
+
+    Dictionary<string, FieldInfoEx> FieldsOf(Type t)
+    {
+        if (fieldCache.TryGetValue(t, out var d)) return d;
+        d = new Dictionary<string, FieldInfoEx>();
+        fieldCache[t] = d;
+        var chain = new List<Type>();
+        for (var b = t; b != null; b = SafeBase(b)) chain.Add(b);
+        // du plus dérivé vers la base : le plus dérivé gagne
+        foreach (var ty in chain)
+        {
+            FieldInfo[] fields;
+            try { fields = ty.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly); }
+            catch { continue; }
+            foreach (var f in fields)
+            {
+                var ex = new FieldInfoEx { Field = f };
+                var aliases = new List<string>();
+                try
+                {
+                    foreach (var a in f.GetCustomAttributesData())
+                    {
+                        switch (a.AttributeType.FullName)
+                        {
+                            case "Verse.MustTranslateAttribute": ex.MustTranslate = true; break;
+                            case "Verse.NoTranslateAttribute": ex.NoTranslate = true; break;
+                            case "Verse.TranslationHandleAttribute":
+                                ex.HandlePriority = 0;
+                                foreach (var na in a.NamedArguments)
+                                    if (na.MemberName == "Priority" && na.TypedValue.Value is int p) ex.HandlePriority = p;
+                                break;
+                            case "Verse.LoadAliasAttribute":
+                                var al = AttrArgString(a); if (al != null) aliases.Add(al);
+                                break;
+                        }
+                    }
+                }
+                catch { }
+                d.TryAdd(f.Name, ex);
+                foreach (var al in aliases) d.TryAdd(al, ex);
+            }
+        }
+        return d;
+    }
+
+    public FieldInfoEx? Field(Type t, string name) => FieldsOf(t).TryGetValue(name, out var f) ? f : null;
+
+    public List<FieldInfoEx> HandleFields(Type t)
+    {
+        if (handleCache.TryGetValue(t, out var l)) return l;
+        l = FieldsOf(t).Values.Where(f => f.HandlePriority != null).Distinct()
+            .OrderByDescending(f => f.HandlePriority).ToList();
+        handleCache[t] = l;
+        return l;
+    }
+
+    readonly Dictionary<string, (PEReader pe, MetadataReader md, Dictionary<string, TypeDefinitionHandle> types)> peCache = new();
+
+    (PEReader pe, MetadataReader md, Dictionary<string, TypeDefinitionHandle> types)? Pe(string path)
+    {
+        if (peCache.TryGetValue(path, out var c)) return c;
+        try
+        {
+            var pe = new PEReader(File.OpenRead(path));
+            var md = pe.GetMetadataReader();
+            var d = new Dictionary<string, TypeDefinitionHandle>();
+            foreach (var th in md.TypeDefinitions)
+            {
+                var td = md.GetTypeDefinition(th);
+                if (!td.GetDeclaringType().IsNil) continue;
+                var ns = md.GetString(td.Namespace); var n = md.GetString(td.Name);
+                d.TryAdd(ns == "" ? n : ns + "." + n, th);
+            }
+            return peCache[path] = (pe, md, d);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Type affecté par défaut dans le constructeur (ex. compClass = typeof(CompX)), lu dans l'IL.</summary>
+    public string? DefaultTypeAssigned(Type t, string fieldName)
+    {
+        for (var b = t; b != null; b = SafeBase(b))
+        {
+            try
+            {
+                var loc = b.Assembly.Location;
+                if (string.IsNullOrEmpty(loc)) continue;
+                var p = Pe(loc);
+                if (p == null || b.FullName == null || !p.Value.types.TryGetValue(b.FullName, out var th)) continue;
+                var (pe, md, _) = p.Value;
+                var td = md.GetTypeDefinition(th);
+                foreach (var mh in td.GetMethods())
+                {
+                    var m = md.GetMethodDefinition(mh);
+                    if (md.GetString(m.Name) != ".ctor" || m.RelativeVirtualAddress == 0) continue;
+                    if (m.GetParameters().Count != 0) continue;
+                    var il = pe.GetMethodBody(m.RelativeVirtualAddress).GetILBytes();
+                    if (il == null) continue;
+                    for (int i = 0; i < il.Length - 5; i++)
+                    {
+                        if (il[i] != 0xD0) continue;
+                        int tok = BitConverter.ToInt32(il, i + 1);
+                        var table = tok >> 24;
+                        if (table != 0x01 && table != 0x02) continue;
+                        var h = MetadataTokens.EntityHandle(tok);
+                        if (h.Kind == HandleKind.TypeDefinition) return md.GetString(md.GetTypeDefinition((TypeDefinitionHandle)h).Name);
+                        if (h.Kind == HandleKind.TypeReference) return md.GetString(md.GetTypeReference((TypeReferenceHandle)h).Name);
+                    }
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    public void Dispose() { foreach (var v in peCache.Values) v.pe.Dispose(); mlc.Dispose(); }
+}
+
+/// <summary>Recherche de chaînes littérales utilisées dans les méthodes d'une DLL (pour retrouver où une clé Keyed est utilisée).</summary>
+public static class DllStringScanner
+{
+    public static Dictionary<string, List<string>> Scan(string dllPath)
+    {
+        var res = new Dictionary<string, List<string>>();
+        try
+        {
+            using var fs = File.OpenRead(dllPath);
+            using var pe = new PEReader(fs);
+            if (!pe.HasMetadata) return res;
+            var md = pe.GetMetadataReader();
+            foreach (var th in md.TypeDefinitions)
+            {
+                var td = md.GetTypeDefinition(th);
+                var tname = TypeName(md, td);
+                foreach (var mh in td.GetMethods())
+                {
+                    var m = md.GetMethodDefinition(mh);
+                    if (m.RelativeVirtualAddress == 0) continue;
+                    byte[] il;
+                    try { il = pe.GetMethodBody(m.RelativeVirtualAddress).GetILBytes() ?? Array.Empty<byte>(); } catch { continue; }
+                    var mname = md.GetString(m.Name);
+                    for (int i = 0; i < il.Length - 4; i++)
+                    {
+                        if (il[i] != 0x72 || il[i + 4] != 0x70) continue;
+                        int off = BitConverter.ToInt32(il, i + 1) & 0x00FFFFFF;
+                        try
+                        {
+                            var s = md.GetUserString(MetadataTokens.UserStringHandle(off));
+                            if (s.Length is 0 or > 200) continue;
+                            if (!res.TryGetValue(s, out var l)) res[s] = l = new();
+                            var u = tname + "." + mname;
+                            if (!l.Contains(u)) l.Add(u);
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+        catch { }
+        return res;
+    }
+
+    static string TypeName(MetadataReader md, TypeDefinition td)
+    {
+        var name = md.GetString(td.Name);
+        var decl = td.GetDeclaringType();
+        if (!decl.IsNil) return TypeName(md, md.GetTypeDefinition(decl)) + "+" + name;
+        var ns = md.GetString(td.Namespace);
+        return ns == "" ? name : ns + "." + name;
+    }
+}
+
+public static class Probe
+{
+    public static void Dump(TypeIndex idx, string name)
+    {
+        var t = idx.Resolve(name);
+        if (t == null) { Console.WriteLine("introuvable"); return; }
+        for (var b = t; b != null; b = TypeIndex.SafeBase(b))
+        {
+            Console.WriteLine("== " + b.FullName);
+            foreach (var f in b.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly))
+            {
+                var ats = string.Join(",", f.GetCustomAttributesData().Select(a => a.AttributeType.Name));
+                if (f.FieldType.FullName == "System.String" || ats != "")
+                    Console.WriteLine($"  {f.FieldType.Name} {f.Name}  [{ats}]");
+            }
+        }
+    }
+}
+
+public static class Probe2
+{
+    public static void Ctor(TypeIndex idx, string name)
+    {
+        var t = idx.Resolve(name);
+        if (t == null) { Console.WriteLine("introuvable"); return; }
+        foreach (var c in t.GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+        {
+            Console.WriteLine("ctor params=" + c.GetParameters().Length);
+            try
+            {
+                var il = c.GetMethodBody()?.GetILAsByteArray();
+                Console.WriteLine(il == null ? "no IL" : BitConverter.ToString(il));
+                for (int i = 0; il != null && i < il.Length - 4; i++)
+                    if (il[i] == 0xD0)
+                    {
+                        int tok = BitConverter.ToInt32(il, i + 1);
+                        Console.WriteLine($"ldtoken {tok:X}");
+                        try { Console.WriteLine(" -> " + c.Module.ResolveType(tok).FullName); } catch (Exception e) { Console.WriteLine(" ERR " + e.GetType().Name + e.Message); }
+                    }
+            }
+            catch (Exception e) { Console.WriteLine("ERR " + e.Message); }
+        }
+    }
+}
