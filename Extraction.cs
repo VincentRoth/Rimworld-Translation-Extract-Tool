@@ -123,6 +123,7 @@ public sealed class Extraction
     {
         v = v.Trim();
         if (v.Length == 0 || !v.Any(char.IsLetter)) return false;
+        if (v.Count(c => c == '*' || c == '|') >= 6) return false;   // données sérialisées (ex. préréglage de colon), pas du texte
         if (v.Contains('/') || v.Contains('\\') || v.EndsWith(".png") || v.EndsWith(".dll")) return false;
         if (Regex.IsMatch(v, @"^[\w\-\.]+$"))                      // un seul mot
             return field != "" && TextyName.IsMatch(field) && !v.Contains('_') && !v.Contains('.');

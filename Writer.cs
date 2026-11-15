@@ -84,9 +84,10 @@ public sealed class LanguageWriter
                 if (!seenKeys.Add(e.Key)) continue;
                 used.Add(e.Key);
                 var (c, max, isShort) = ctx.ForDef(e);
+                var soft = ctx.IsSoftDef(e);
                 var fr = official.Def(e.Folder, e.Key);
                 EmitEntry(sb, e.Key, e.Value, e.Items, c, max, isShort, e.Marked, fr, existing,
-                    $"{e.DefTypeName}.{e.Path}");
+                    $"{e.DefTypeName}.{e.Path}", soft);
             }
             EmitObsolete(sb, existing, used);
             Footer(sb);
@@ -133,7 +134,7 @@ public sealed class LanguageWriter
     static void Footer(StringBuilder sb) => sb.Append("</LanguageData>\n");
 
     void EmitEntry(StringBuilder sb, string key, string value, List<string>? items, string? context, int? max, bool isShort,
-        bool marked, string? frOfficial, Existing existing, string? where)
+        bool marked, string? frOfficial, Existing existing, string? where, bool soft = false)
     {
         string enText = items != null ? string.Join(" | ", items) : value;
         sb.Append("  <!-- EN: ").Append(San(items != null
@@ -153,8 +154,15 @@ public sealed class LanguageWriter
 
         int len = enText.Length;
         int? lim = max ?? (isShort ? (int)Math.Ceiling(len * 1.3) + 2 : null);
+        if (Regex.IsMatch(enText, "[㐀-鿿]"))
+        {
+            lim = null;   // texte source en chinois : un nombre de caractères n'a pas de sens pour le français
+            sb.Append("  <!-- Texte source en chinois : pas de limite de longueur calculée -->\n");
+        }
         if (lim != null)
-            sb.Append($"  <!-- Limite: ~{lim} car. (EN: {len}) max={lim} -->\n");
+            sb.Append(soft
+                ? $"  <!-- Limite souple (nom d'objet, indicative) : ~{lim} car. (EN: {len}) max={lim} soft -->\n"
+                : $"  <!-- Limite: ~{lim} car. (EN: {len}) max={lim} -->\n");
 
         if (!string.IsNullOrEmpty(frOfficial))
             sb.Append("  <!-- FR du jeu de base : ").Append(San(frOfficial!)).Append(" -->\n");
@@ -212,20 +220,20 @@ public static class Checker
         var files = Directory.Exists(path)
             ? Directory.EnumerateFiles(path, "*.xml", SearchOption.AllDirectories).ToList()
             : new List<string> { path };
-        int todo = 0, tooLong = 0, missingPh = 0, total = 0;
+        int todo = 0, tooLong = 0, missingPh = 0, total = 0, softLong = 0;
         foreach (var f in files)
         {
             XDocument doc;
             try { doc = XDocument.Load(f); } catch { continue; }
-            string? en = null; int? max = null;
+            string? en = null; int? max = null; bool soft = false;
             foreach (var n in doc.Root?.Nodes() ?? Enumerable.Empty<XNode>())
             {
                 if (n is XComment c)
                 {
                     var t = c.Value.Trim();
-                    if (t.StartsWith("EN:")) { en = t[3..].Trim(); max = null; }
-                    var m = Regex.Match(t, @"max=(\d+)");
-                    if (m.Success) max = int.Parse(m.Groups[1].Value);
+                    if (t.StartsWith("EN:")) { en = t[3..].Trim(); max = null; soft = false; }
+                    var m = Regex.Match(t, @"max=(\d+)( soft)?");
+                    if (m.Success) { max = int.Parse(m.Groups[1].Value); soft = m.Groups[2].Success; }
                 }
                 else if (n is XElement e)
                 {
@@ -235,16 +243,17 @@ public static class Checker
                     if (val.Contains("TODO")) { todo++; Console.WriteLine($"TODO       {rel}: {e.Name.LocalName}"); }
                     else
                     {
-                        if (max != null && val.Length > max) { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); }
+                        if (max != null && val.Length > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } }
                         if (en != null)
                             foreach (var ph in ContextResolver.FindPlaceholders(en))
                                 if (ph.StartsWith("{") && !val.Contains(ph)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {e.Name.LocalName} manque {ph}"); }
                     }
-                    en = null; max = null;
+                    en = null; max = null; soft = false;
                 }
             }
         }
-        Console.WriteLine($"\n{total} entrées : {todo} TODO, {tooLong} trop longues, {missingPh} placeholders manquants.");
+        Console.WriteLine($"\n{total} entrées : {todo} TODO, {tooLong} trop longues, {missingPh} placeholders manquants"
+            + (softLong > 0 ? $" ({softLong} noms d'objet au-delà de la limite souple, à apprécier)." : "."));
         return todo + tooLong + missingPh == 0 ? 0 : 1;
     }
 }

@@ -26,7 +26,7 @@ Options : `--version 1.6`, `--with id1,id2` (mods optionnels actifs), `--out`, `
 - Relancer fusionne : les traductions déjà saisies sont conservées, les EN modifiés sont signalés
   (`ATTENTION`), les clés disparues passent en commentaire `OBSOLETE`.
 - Textes ajoutés/modifiés par les patchs du mod sur d'autres mods/Core : fichiers `Patches_<fichier>.xml`.
-- `context-rules.json` : règles de contexte/longueur éditables (premier match gagne).
+- `context-rules.json` : règles de contexte/longueur éditables (premier match gagne). Une règle avec `"soft": true` (noms d'objets : `ThingDef.label`, `labelPlural`) produit une « Limite souple » : `--check` signale un dépassement en `LONG (souple)` sans le compter comme erreur.
 - `report.txt` : comptes, patchs C# non exécutés, types introuvables, champs texte non marqués ignorés.
 
 - Si le mod embarque déjà du français (`Languagesrench*`), l'outil l'annonce en console et dans `report.txt` (section « traduction déjà fournie par le mod ») : couverture, entrées manquantes, clés obsolètes, anciennes clés indexées (`comps.0.tools.0`). la traduction du mod n'est jamais modifiée.

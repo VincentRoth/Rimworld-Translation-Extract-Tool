@@ -12,8 +12,8 @@
     { "def": "StatPart*", "field": "*", "context": "Texte de calcul de stat (infobulle détaillant la valeur)" },
 
     // ---------- Objets / bâtiments ----------
-    { "def": "ThingDef", "field": "label", "context": "ThingDef : nom de l'objet/bâtiment/créature (menu Architecte, inventaire, titre de sélection, infobulles) - minuscule en anglais, pas de point", "short": true },
-    { "def": "ThingDef", "field": "labelPlural", "context": "ThingDef : pluriel du nom (piles, listes, messages)", "short": true },
+    { "def": "ThingDef", "field": "label", "context": "ThingDef : nom de l'objet/bâtiment/créature (menu Architecte, inventaire, titre de sélection, infobulles) - minuscule en anglais, pas de point", "short": true, "soft": true },
+    { "def": "ThingDef", "field": "labelPlural", "context": "ThingDef : pluriel du nom (piles, listes, messages)", "short": true, "soft": true },
     { "def": "ThingDef", "field": "description", "context": "ThingDef : description (fiche d'info, infobulle du menu Architecte) - longueur libre" },
     { "def": "ThingDef", "field": "stuffProps.stuffAdjective", "context": "Adjectif de matériau placé devant le nom (ex. « en bois ») - très court", "short": true },
     { "def": "ThingDef", "field": "tools.*.label", "context": "Nom d'une attaque de mêlée (journal de combat, fiche d'info) - très court", "short": true },
@@ -32,7 +32,7 @@
     { "def": "DesignationCategoryDef", "field": "description", "context": "Infobulle de l'onglet Architecte" },
 
     // ---------- Fabrication, recettes, travail ----------
-    { "def": "RecipeDef", "field": "label", "context": "RecipeDef : nom de l'ordre de fabrication / opération chirurgicale (liste des ordres, menu chirurgie)", "short": true },
+    { "def": "RecipeDef", "field": "label", "context": "RecipeDef : nom de l'ordre de fabrication / opération chirurgicale (liste des ordres, menu chirurgie)", "short": true, "soft": true },
     { "def": "RecipeDef", "field": "jobString", "context": "RecipeDef : texte d'activité du colon pendant la tâche (barre d'info « {0} » = cible) - verbe à l'infinitif/gérondif" },
     { "def": "RecipeDef", "field": "description", "context": "RecipeDef : infobulle de l'ordre de fabrication" },
     { "def": "RecipeDef", "field": "*Message", "context": "Message affiché à l'écran après l'opération" },

@@ -12,6 +12,7 @@ public sealed class Rule
     public string Context { get; set; } = "";
     public int? Max { get; set; }
     public bool Short { get; set; }
+    public bool Soft { get; set; }   // limite indicative (noms d'objets) : avertissement au lieu d'erreur
 }
 
 public sealed class RuleFile
@@ -43,6 +44,17 @@ public sealed class ContextResolver
             return (r.Context, r.Max, r.Short);
         }
         return (null, null, false);
+    }
+
+    public bool IsSoftDef(Entry e)
+    {
+        foreach (var r in rules.DefRules)
+        {
+            if (r.Def != "*" && !e.TypeChain.Contains(r.Def)) continue;
+            if (!Glob(r.Field, e.Path)) continue;
+            return r.Soft;
+        }
+        return false;
     }
 
     public (string? ctx, int? max, bool isShort) ForKeyed(KeyedEntry k)
