@@ -101,7 +101,7 @@ public sealed class PatchEngine
             case "PatchOperationFindMod":
             {
                 var mods = op["mods"]?.ChildNodes.OfType<XmlElement>().Select(x => x.InnerText.Trim().ToLowerInvariant()) ?? Enumerable.Empty<string>();
-                bool found = mods.Any(activeNames.Contains);
+                bool found = GameEnv.AssumeAll || mods.Any(activeNames.Contains);
                 var branch = found ? op["match"] : op["nomatch"];
                 return branch == null || Apply(branch);
             }

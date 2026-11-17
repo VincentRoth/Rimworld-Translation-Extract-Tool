@@ -161,26 +161,42 @@ public sealed class Pipeline
 
     static bool IsList(XmlElement e) => e.ChildNodes.OfType<XmlElement>().Any(c => c.Name == "li");
 
-    /// <summary>Applique les surcharges de child sur dst (déjà copie du parent).</summary>
-    static void MergeInto(XmlElement dst, XmlElement child)
+    /// <summary>Reproduit XmlInheritance.RecursiveNodeCopyOverwriteElements : applique child sur dst (déjà copie du parent).
+    /// Les éléments &lt;li&gt; du child s'ajoutent à ceux du parent (sauf Inherit="False") ; les autres éléments se fusionnent.</summary>
+    static void MergeInto(XmlElement dst, XmlElement child, bool top = true)
     {
-        foreach (var n in child.ChildNodes.OfType<XmlElement>().ToList())
+        if (string.Equals(child.GetAttribute("Inherit"), "false", StringComparison.OrdinalIgnoreCase))
         {
+            foreach (var x in dst.ChildNodes.Cast<XmlNode>().ToList()) dst.RemoveChild(x);
+            foreach (XmlNode x in child.ChildNodes) dst.AppendChild(dst.OwnerDocument.ImportNode(x, true));
+            foreach (XmlAttribute a in child.Attributes!) if (a.Name != "Inherit") dst.SetAttribute(a.Name, a.Value);
+            return;
+        }
+        if (!top)
+        {
+            dst.Attributes!.RemoveAll();
+            foreach (XmlAttribute a in child.Attributes!) dst.SetAttribute(a.Name, a.Value);
+        }
+        var text = child.ChildNodes.Cast<XmlNode>().LastOrDefault(x => x.NodeType == XmlNodeType.Text);
+        if (text != null)
+        {
+            foreach (var x in dst.ChildNodes.Cast<XmlNode>().ToList()) dst.RemoveChild(x);
+            dst.AppendChild(dst.OwnerDocument.ImportNode(text, true));
+            return;
+        }
+        var elems = child.ChildNodes.OfType<XmlElement>().ToList();
+        if (elems.Count == 0)
+        {
+            if (dst.ChildNodes.OfType<XmlElement>().Any()) return;
+            foreach (var x in dst.ChildNodes.Cast<XmlNode>().ToList()) dst.RemoveChild(x);
+            return;
+        }
+        foreach (var n in elems)
+        {
+            if (n.Name == "li") { dst.AppendChild(dst.OwnerDocument.ImportNode(n, true)); continue; }
             var existing = dst.ChildNodes.OfType<XmlElement>().FirstOrDefault(x => x.Name == n.Name);
-            bool inheritFalse = string.Equals(n.GetAttribute("Inherit"), "false", StringComparison.OrdinalIgnoreCase);
-            if (existing == null)
-            {
-                dst.AppendChild(dst.OwnerDocument.ImportNode(n, true));
-            }
-            else if (inheritFalse || IsList(n) || !n.ChildNodes.OfType<XmlElement>().Any() || !existing.ChildNodes.OfType<XmlElement>().Any())
-            {
-                dst.ReplaceChild(dst.OwnerDocument.ImportNode(n, true), existing);
-            }
-            else
-            {
-                foreach (XmlAttribute a in n.Attributes!) existing.SetAttribute(a.Name, a.Value);
-                MergeInto(existing, n);
-            }
+            if (existing != null) MergeInto(existing, n, false);
+            else dst.AppendChild(dst.OwnerDocument.ImportNode(n, true));
         }
     }
 }

@@ -1,0 +1,32 @@
+{
+  // Textes absents du XML mais traduisibles : l'anglais est déduit d'un autre champ (premier non vide de "From" ; ^ = champ de la def).
+  // Sert surtout au français : formes féminines, pluriels, libellés par défaut du code.
+  // Les défauts littéraux fixés par le constructeur (ex. FactionDef.leaderTitle = "leader") sont lus dans l'IL, pas ici.
+  "companions": [
+    { "type": "BackstoryDef", "field": "titleFemale",      "from": "title" },
+    { "type": "BackstoryDef", "field": "titleShortFemale", "from": "titleShort|title" },
+
+    { "type": "PawnKindDef", "field": "labelPlural",       "from": "label" },
+    { "type": "PawnKindDef", "field": "labelMale",         "from": "label" },
+    { "type": "PawnKindDef", "field": "labelMalePlural",   "from": "label" },
+    { "type": "PawnKindDef", "field": "labelFemale",       "from": "label" },
+    { "type": "PawnKindDef", "field": "labelFemalePlural", "from": "label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "label",             "from": "^label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "labelPlural",       "from": "label|^label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "labelMale",         "from": "label|^label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "labelMalePlural",   "from": "label|^label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "labelFemale",       "from": "label|^label" },
+    { "type": "PawnKindDef", "list": "lifeStages", "field": "labelFemalePlural", "from": "label|^label" },
+
+    { "type": "PawnRelationDef", "field": "labelFemale", "from": "label" },
+    { "type": "FactionDef", "field": "leaderTitleFemale", "from": "leaderTitle", "fallback": "leader" },
+    { "type": "HediffDef", "field": "labelNoun", "from": "label" },
+    { "type": "MentalStateDef", "field": "beginLetterLabel", "from": "label" },
+    { "type": "InspirationDef", "field": "beginLetterLabel", "from": "label" },
+    { "type": "ThingDef", "path": "stuffProps", "field": "stuffAdjective", "from": "^label" },
+
+    // Une arme à un seul verbe : le jeu copie le nom de l'objet dans le libellé du verbe (ThingDef.PostLoad).
+    { "type": "ThingDef", "list": "verbs", "onlySingle": true, "field": "label", "from": "^label",
+      "note": "libellé du verbe unique = nom de l'objet (ThingDef.PostLoad)" }
+  ]
+}

@@ -221,6 +221,59 @@ public sealed class TypeIndex : IDisposable
         return null;
     }
 
+    readonly Dictionary<Type, Dictionary<string, string>> strDefaultCache = new();
+
+    /// <summary>Valeurs littérales affectées aux champs string dans les constructeurs sans paramètre (initialiseurs de champ,
+    /// ex. <c>leaderTitle = "leader"</c>), lues dans l'IL : le champ le plus dérivé l'emporte.</summary>
+    public Dictionary<string, string> StringDefaults(Type t)
+    {
+        if (strDefaultCache.TryGetValue(t, out var res)) return res;
+        res = new Dictionary<string, string>();
+        strDefaultCache[t] = res;
+        for (var b = t; b != null; b = SafeBase(b))
+        {
+            try
+            {
+                var loc = b.Assembly.Location;
+                if (string.IsNullOrEmpty(loc)) continue;
+                var p = Pe(loc);
+                if (p == null || b.FullName == null || !p.Value.types.TryGetValue(b.FullName, out var th)) continue;
+                var (pe, md, _) = p.Value;
+                var td = md.GetTypeDefinition(th);
+                foreach (var mh in td.GetMethods())
+                {
+                    var m = md.GetMethodDefinition(mh);
+                    if (md.GetString(m.Name) != ".ctor" || m.RelativeVirtualAddress == 0) continue;
+                    if (m.GetParameters().Count != 0) continue;
+                    var il = pe.GetMethodBody(m.RelativeVirtualAddress).GetILBytes();
+                    if (il == null) continue;
+                    // ldarg.0 ; ldstr <tok> ; stfld <tok>
+                    for (int i = 0; i + 10 < il.Length; i++)
+                    {
+                        if (il[i] != 0x02 || il[i + 1] != 0x72 || il[i + 6] != 0x7D) continue;
+                        int sTok = BitConverter.ToInt32(il, i + 2);
+                        if ((sTok >> 24) != 0x70) continue;
+                        int fTok = BitConverter.ToInt32(il, i + 7);
+                        string? fname = null;
+                        try
+                        {
+                            var eh = MetadataTokens.EntityHandle(fTok);
+                            if (eh.Kind == HandleKind.FieldDefinition) fname = md.GetString(md.GetFieldDefinition((FieldDefinitionHandle)eh).Name);
+                            else if (eh.Kind == HandleKind.MemberReference) fname = md.GetString(md.GetMemberReference((MemberReferenceHandle)eh).Name);
+                        }
+                        catch { }
+                        if (fname == null) continue;
+                        string s;
+                        try { s = md.GetUserString(MetadataTokens.UserStringHandle(sTok & 0x00FFFFFF)); } catch { continue; }
+                        if (s.Length > 0) res.TryAdd(fname, s);
+                    }
+                }
+            }
+            catch { }
+        }
+        return res;
+    }
+
     public void Dispose() { foreach (var v in peCache.Values) v.pe.Dispose(); mlc.Dispose(); }
 }
 

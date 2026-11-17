@@ -23,6 +23,8 @@ Options :
   --skip-shipped       ne pas extraire les entrées que le mod traduit déjà lui-même (voir l'avertissement)
   --fresh              ne pas fusionner avec une sortie existante
   --strict             ignorer les champs sans [MustTranslate]
+  --respect-conditions respecter IfModActive/MayRequire/FindMod (défaut : tout est supposé actif, pour extraire tous les textes)
+  --no-implicit        ne pas extraire les textes absents du XML (défauts du code, formes féminines/plurielles, voir implicit-rules.json)
   --scan-dll           analyser les DLL du mod pour trouver où les clés Keyed sont utilisées
   --game-dir <dossier> dossier RimWorld
   --workshop-dir <d>   dossier workshop\content\294100
@@ -44,7 +46,7 @@ Options :
         Console.OutputEncoding = Encoding.UTF8;
         string? target = null, outDir = null, with = null, lang = "French", placeholder = "TODO",
                 gameDir = null, workDir = null, version = null, checkPath = null, calibrate = null, listFilter = null, probe = null;
-        bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false;
+        bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false, noImplicit = false; string? dumpDef = null;
         for (int i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new Exception("Valeur manquante pour " + args[i]);
@@ -59,6 +61,9 @@ Options :
                 case "--fresh": fresh = true; break;
                 case "--skip-shipped": skipShipped = true; break;
                 case "--strict": strict = true; break;
+                case "--no-implicit": noImplicit = true; break;
+                case "--dump-def": dumpDef = Next(); break;
+                case "--respect-conditions": GameEnv.AssumeAll = false; break;
                 case "--scan-dll": scanDll = true; break;
                 case "--game-dir": gameDir = Next(); break;
                 case "--workshop-dir": workDir = Next(); break;
@@ -102,33 +107,35 @@ Options :
         Console.WriteLine($"Cible : {mod}  ({mod.Root})  version {env.Version}");
 
         var extra = (with ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var order = env.BuildLoadOrder(mod, extra, rep);
-        Console.WriteLine("Ordre : " + string.Join(" > ", order.Select(o => o.Name)));
-
-        var pipe = new Pipeline(env, order, mod, rep);
-        pipe.Load();
-        Console.WriteLine($"Defs chargées : {pipe.BaseDoc.DocumentElement!.ChildNodes.Count}, patchs : {pipe.Patches.Count}  ({sw.Elapsed.TotalSeconds:F1}s)");
-
-        // DLL des mods (cible + dépendances) pour résoudre les types custom
-        var dlls = order.Where(o => !o.Official).SelectMany(o => o.Folders)
-            .Select(f => Path.Combine(f, "Assemblies")).Where(Directory.Exists).Distinct()
-            .SelectMany(d => Directory.GetFiles(d, "*.dll")).ToList();
-        using var types = new TypeIndex(env.ManagedDir, dlls, rep);
-        var ext = new Extraction(types, rep) { IncludeUnmarked = !strict, CountOrigin = mod.PackageId };
-
+        var sw0 = sw;
         string tid = mod.PackageId;
-        // run B : tous les patchs
-        var docB = pipe.Build(true);
-        var entriesB = ext.ExtractDefs(docB, o => true);
-        Console.WriteLine($"Entrées brutes : {entriesB.Count}  ({sw.Elapsed.TotalSeconds:F1}s)");
 
-        List<Entry> entries;
-        if (mod.Official)
+        // Une passe = un jeu de conditions. Par défaut deux passes : conditions respectées (mod seul), puis tout supposé actif
+        // (variantes IfModActive/MayRequire/FindMod, CE...) ; l'union est extraite, la première passe l'emportant en cas de conflit
+        // (des variantes exclusives peuvent se remplacer l'une l'autre : on garde alors les deux jeux de clés).
+        List<Entry> Collect(bool assumeAll, bool note)
         {
-            entries = entriesB.Where(e => e.Origin == tid).ToList();
-        }
-        else
-        {
+            GameEnv.AssumeAll = assumeAll;
+            var order = env.BuildLoadOrder(mod, extra, rep);
+            if (note) Console.WriteLine("Ordre : " + string.Join(" > ", order.Select(o => o.Name)));
+            var pipe = new Pipeline(env, order, mod, rep);
+            pipe.Load();
+            Console.WriteLine($"[{(assumeAll ? "toutes conditions" : "conditions respectées")}] Defs chargées : {pipe.BaseDoc.DocumentElement!.ChildNodes.Count}, patchs : {pipe.Patches.Count}  ({sw.Elapsed.TotalSeconds:F1}s)");
+
+            // DLL des mods (cible + dépendances) pour résoudre les types custom
+            var dlls = order.Where(o => !o.Official).SelectMany(o => o.Folders)
+                .Select(f => Path.Combine(f, "Assemblies")).Where(Directory.Exists).Distinct()
+                .SelectMany(d => Directory.GetFiles(d, "*.dll")).ToList();
+            using var types = new TypeIndex(env.ManagedDir, dlls, rep);
+            var ext = new Extraction(types, rep) { IncludeUnmarked = !strict, CountOrigin = mod.PackageId, ImplicitDefaults = !noImplicit, Companions = CompanionFile.Load(Path.Combine(ToolDir(), "implicit-rules.json")) };
+
+            // run B : tous les patchs
+            var docB = pipe.Build(true);
+            if (dumpDef != null) foreach (var n in docB.SelectNodes("//*[defName='" + dumpDef + "']")!.OfType<System.Xml.XmlElement>()) Console.WriteLine(n.OuterXml);
+            var entriesB = ext.ExtractDefs(docB, o => true);
+            Console.WriteLine($"Entrées brutes : {entriesB.Count}  ({sw.Elapsed.TotalSeconds:F1}s)");
+
+            if (mod.Official) return entriesB.Where(e => e.Origin == tid).ToList();
             var own = entriesB.Where(e => e.Origin == tid).ToList();
             var foreign = entriesB.Where(e => e.Origin != tid).ToList();
             var baseline = new Dictionary<string, string>();
@@ -139,9 +146,23 @@ Options :
             }
             else foreach (var e in foreign) baseline[e.Folder + "/" + e.Key] = e.Sig;
             var changed = foreign.Where(e => !baseline.TryGetValue(e.Folder + "/" + e.Key, out var s) || s != e.Sig).ToList();
-            entries = own.Concat(changed).ToList();
-            rep.Notes.Add($"Defs du mod : {own.Count} entrées ; textes ajoutés/modifiés par ses patchs sur d'autres mods : {changed.Count}");
+            if (note) rep.Notes.Add($"Defs du mod : {own.Count} entrées ; textes ajoutés/modifiés par ses patchs sur d'autres mods : {changed.Count}");
+            return own.Concat(changed).ToList();
         }
+
+        var wantAll = GameEnv.AssumeAll;
+        List<Entry> entries;
+        if (wantAll && !mod.Official)
+        {
+            var first = Collect(false, false);
+            var all = Collect(true, true);    // laisse mod.Folders au maximum (Keyed de tous les dossiers)
+            var seen = first.Select(e => e.Folder + "/" + e.Key).ToHashSet();
+            var onlyAll = all.Where(e => !seen.Contains(e.Folder + "/" + e.Key)).ToList();
+            rep.Notes.Add($"Textes propres aux variantes conditionnelles (dossiers IfModActive, MayRequire, FindMod, CE...) : {onlyAll.Count} entrées en plus du mod seul");
+            entries = first.Concat(onlyAll).ToList();
+            var du = rep.UnknownTypes.Distinct().ToList(); rep.UnknownTypes.Clear(); rep.UnknownTypes.AddRange(du);
+        }
+        else entries = Collect(wantAll, true);
 
         if (calibrate != null) return Calibrate(env, mod, entries, rep);
 
@@ -151,7 +172,7 @@ Options :
             foreach (var d in mod.Folders.Select(f => Path.Combine(f, "Assemblies")).Where(Directory.Exists).Distinct())
                 foreach (var dll in Directory.GetFiles(d, "*.dll"))
                     foreach (var kv in DllStringScanner.Scan(dll)) usages[kv.Key] = kv.Value;
-        var keyed = ext.ExtractKeyed(mod, usages);
+        var keyed = new Extraction(null!, rep).ExtractKeyed(mod, usages);
         if (keyed.Count == 0 && mod.Folders.All(f => !Directory.Exists(Path.Combine(f, "Languages", "English", "Keyed"))))
             rep.Notes.Add("Aucun dossier Languages/English/Keyed dans le mod.");
 
@@ -191,7 +212,7 @@ Options :
     static void WriteReport(string outDir, ModMeta mod, List<Entry> entries, List<KeyedEntry> keyed, LanguageWriter w, Report rep, GameEnv env)
     {
         Directory.CreateDirectory(outDir);
-        rep.Notes.Add("Non extraits (générés par le code du jeu, absents du XML) : labelPlural/lifeStages des PawnKindDef, recettes/terrains implicites, valeurs par défaut comme labelNoun ou WorkTypeDef.label.");
+        rep.Notes.Add("Non extraits (générés par le code du jeu) : recettes/terrains implicites, valeurs par défaut non littérales (ex. WorkTypeDef.label), textes ajoutés par des patchs C# (CE...). Les formes absentes du XML listées dans implicit-rules.json sont extraites (sauf --no-implicit).");
         var sb = new StringBuilder();
         sb.AppendLine($"Mod : {mod}  — version jeu {env.Version}");
         sb.AppendLine($"Entrées defs : {entries.Count}, Keyed : {keyed.Count}");

@@ -17,6 +17,7 @@ public sealed class Entry
     public string Origin = "";        // packageId du mod d'origine de la def
     public bool Marked;               // champ [MustTranslate]
     public string FieldType = "";
+    public string? Note;              // origine d'une valeur absente du XML (défaut du code, forme optionnelle)
     public string Key => DefName + "." + Path;
     public string Leaf => Path.Contains('.') ? Path[(Path.LastIndexOf('.') + 1)..] : Path;
     public string Sig => Items != null ? string.Join("\u0001", Items) : Value;
@@ -35,6 +36,8 @@ public sealed class Extraction
     readonly TypeIndex types;
     readonly Report rep;
     public bool IncludeUnmarked = true;
+    public bool ImplicitDefaults = true;
+    public CompanionFile Companions = new();
     public string? CountOrigin;
     string curOrigin = "";
     readonly HashSet<string> unknownTypes = new();
@@ -77,8 +80,67 @@ public sealed class Extraction
             ctx.TypeName = t.Name;
             ctx.Chain = TypeIndex.BaseChainNames(t).ToList();
             WalkClass(e, t, "", ctx, 0);
+            if (ImplicitDefaults) ApplyCompanions(e, t, ctx);
         }
         return res;
+    }
+
+
+    // -------------------- Formes optionnelles / déduites --------------------
+
+    static string? Text(XmlElement el, string name)
+    {
+        var c = el[name];
+        if (c == null || c.ChildNodes.OfType<XmlElement>().Any()) return null;
+        var t = c.InnerText.Trim();
+        return t.Length == 0 ? null : t;
+    }
+
+    void ApplyCompanions(XmlElement root, Type rootType, Ctx ctx)
+    {
+        foreach (var r in Companions.Companions)
+        {
+            if (!ctx.Chain.Contains(r.Type)) continue;
+            // naviguer jusqu'à l'objet (ou la liste)
+            XmlElement? el = root; Type t = rootType; string path = "";
+            bool ok = true;
+            foreach (var seg in r.Path.Split('.', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = types.Field(t, seg);
+                el = el?[seg];
+                if (f == null || el == null) { ok = false; break; }
+                t = f.Field.FieldTypeSafe(); path = path == "" ? f.Field.Name : path + "." + f.Field.Name;
+            }
+            if (!ok || el == null) continue;
+            var targets = new List<(XmlElement el, Type type, string path)>();
+            if (r.List == "") targets.Add((el, t, path));
+            else
+            {
+                var lf = types.Field(t, r.List);
+                var le = el[r.List];
+                if (lf == null || le == null || !IsListType(lf.Field.FieldTypeSafe(), out var et) || !CanRecurse(et)) continue;
+                var lis = le.ChildNodes.OfType<XmlElement>().Where(x => x.Name == "li").ToList();
+                if (r.OnlySingle && lis.Count != 1) continue;
+                var lp = path == "" ? lf.Field.Name : path + "." + lf.Field.Name;
+                foreach (var (li, itemType, h) in ItemHandles(lis, et)) targets.Add((li, itemType, lp + "." + h));
+            }
+            foreach (var (obj, objType, objPath) in targets)
+            {
+                var ff = types.Field(objType, r.Field);
+                if (ff == null || ff.NoTranslate || !IsString(ff.Field.FieldTypeSafe())) continue;
+                if (Text(obj, r.Field) != null) continue;
+                string? src = null;
+                foreach (var s in r.From.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    src = s.StartsWith('^') ? Text(root, s[1..]) : Text(obj, s);
+                    if (src != null) break;
+                }
+                src ??= r.Fallback == "" ? null : r.Fallback;
+                if (src == null) continue;
+                var p = objPath == "" ? ff.Field.Name : objPath + "." + ff.Field.Name;
+                ctx.AddString(p, src, true, "string", r.Note == "" ? "forme absente du XML (repris de " + r.From + ")" : r.Note);
+            }
+        }
     }
 
     sealed class Ctx
@@ -87,13 +149,13 @@ public sealed class Extraction
         public string Folder = "", TypeName = "", DefName = "", File = "", Origin = "";
         public List<string> Chain = new();
 
-        public void AddString(string path, string raw, bool marked, string ftype)
+        public void AddString(string path, string raw, bool marked, string ftype, string? note = null)
         {
             var v = Norm(raw);
             Defs.Add(new Entry
             {
                 Folder = Folder, File = File, DefName = DefName, Path = path, Value = v,
-                DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = ftype,
+                DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = ftype, Note = note,
             });
         }
         public void AddList(string path, List<string> items, bool marked)
@@ -145,12 +207,14 @@ public sealed class Extraction
     void WalkClass(XmlElement el, Type type, string path, Ctx ctx, int depth)
     {
         if (depth > 7) return;
+        var present = new HashSet<string>();
         foreach (var c in el.ChildNodes.OfType<XmlElement>())
         {
             if (c.Name == "li") continue;
             var f = types.Field(type, c.Name);
             if (f == null) continue;
-            var ft = f.Field.FieldType;
+            present.Add(f.Field.Name);
+            var ft = f.Field.FieldTypeSafe();
             var p = path == "" ? c.Name : path + "." + c.Name;
             // utiliser le nom réel du champ si alias
             if (f.Field.Name != c.Name) p = path == "" ? f.Field.Name : path + "." + f.Field.Name;
@@ -176,30 +240,56 @@ public sealed class Extraction
                 }
                 else if (CanRecurse(et))
                 {
-                    var infos = new List<(XmlElement li, Type type, string handle)>();
-                    int idx = 0;
-                    foreach (var li in lis)
-                    {
-                        var itemType = et;
-                        var cls = li.GetAttribute("Class");
-                        if (cls != "") itemType = types.Resolve(cls) ?? et;
-                        infos.Add((li, itemType, HandleFor(li, itemType, idx)));
-                        idx++;
-                    }
-                    var counts = infos.GroupBy(i => i.handle).ToDictionary(g => g.Key, g => g.Count());
-                    var occ = new Dictionary<string, int>();
-                    foreach (var (li, itemType, handle) in infos)
-                    {
-                        var h = handle;
-                        if (counts[handle] > 1) { occ[handle] = occ.GetValueOrDefault(handle); h = handle + "-" + occ[handle]; occ[handle]++; }
+                    foreach (var (li, itemType, h) in ItemHandles(lis, et))
                         WalkClass(li, itemType, p + "." + h, ctx, depth + 1);
-                    }
                 }
             }
             else if (CanRecurse(ft))
             {
                 WalkClass(c, ft, p, ctx, depth + 1);
             }
+        }
+        AddCodeDefaults(type, path, present, ctx);
+    }
+
+    /// <summary>Éléments d'une liste d'objets avec leur handle de traduction (suffixé -N si plusieurs identiques).</summary>
+    List<(XmlElement li, Type type, string handle)> ItemHandles(List<XmlElement> lis, Type et)
+    {
+        var infos = new List<(XmlElement li, Type type, string handle)>();
+        int idx = 0;
+        foreach (var li in lis)
+        {
+            var itemType = et;
+            var cls = li.GetAttribute("Class");
+            if (cls != "") itemType = types.Resolve(cls) ?? et;
+            infos.Add((li, itemType, HandleFor(li, itemType, idx)));
+            idx++;
+        }
+        var counts = infos.GroupBy(i => i.handle).ToDictionary(g => g.Key, g => g.Count());
+        var occ = new Dictionary<string, int>();
+        var res = new List<(XmlElement, Type, string)>();
+        foreach (var (li, itemType, handle) in infos)
+        {
+            var h = handle;
+            if (counts[handle] > 1) { occ[handle] = occ.GetValueOrDefault(handle); h = handle + "-" + occ[handle]; occ[handle]++; }
+            res.Add((li, itemType, h));
+        }
+        return res;
+    }
+
+    /// <summary>Champs [MustTranslate] absents du XML dont le constructeur fixe un texte par défaut (ex. leaderTitle = "leader") :
+    /// le jeu affiche ce texte anglais, il doit donc pouvoir être traduit.</summary>
+    void AddCodeDefaults(Type type, string path, HashSet<string> present, Ctx ctx)
+    {
+        if (!ImplicitDefaults) return;
+        foreach (var kv in types.StringDefaults(type))
+        {
+            if (present.Contains(kv.Key)) continue;
+            var f = types.Field(type, kv.Key);
+            if (f == null || f.Field.Name != kv.Key || !f.MustTranslate || f.NoTranslate || !IsString(f.Field.FieldTypeSafe())) continue;
+            if (string.IsNullOrWhiteSpace(kv.Value)) continue;
+            var p = path == "" ? kv.Key : path + "." + kv.Key;
+            ctx.AddString(p, kv.Value, true, "string", "valeur par défaut fixée par le code (champ absent du XML)");
         }
     }
 
@@ -236,11 +326,11 @@ public sealed class Extraction
                 var alt = char.ToLowerInvariant(name[12]) + name[13..];
                 val = li[alt]?.InnerText.Trim();
             }
-            if (string.IsNullOrEmpty(val) && hf.Field.FieldType.FullName == "System.Type")
+            if (string.IsNullOrEmpty(val) && hf.Field.FieldTypeSafe().FullName == "System.Type")
                 val = types.DefaultTypeAssigned(itemType, name);
             if (!string.IsNullOrEmpty(val))
             {
-                if (hf.Field.FieldType.FullName == "System.Type" && val.Contains('.')) val = val[(val.LastIndexOf('.') + 1)..];
+                if (hf.Field.FieldTypeSafe().FullName == "System.Type" && val.Contains('.')) val = val[(val.LastIndexOf('.') + 1)..];
                 return Sanitize(val);
             }
         }
@@ -274,5 +364,14 @@ public sealed class Extraction
             }
         }
         return res;
+    }
+}
+
+static class FieldInfoExt
+{
+    /// <summary>Type du champ ; si son assembly est absent (mod non installé), un type neutre qui n'est ni texte, ni liste, ni objet à explorer.</summary>
+    public static Type FieldTypeSafe(this System.Reflection.FieldInfo f)
+    {
+        try { return f.FieldType; } catch { return typeof(object); }
     }
 }

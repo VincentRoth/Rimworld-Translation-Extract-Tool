@@ -225,8 +225,12 @@ public sealed class GameEnv
         return ordered;
     }
 
+    /// <summary>Mode par défaut : toutes les conditions (IfModActive, MayRequire, FindMod...) sont supposées remplies, pour extraire tous les textes du mod.</summary>
+    public static bool AssumeAll = true;
+
     public static bool IsActive(string expr, HashSet<string> activeIds, bool any)
     {
+        if (AssumeAll) return true;
         var ids = expr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(NormId).ToList();
         if (ids.Count == 0) return true;
         return any ? ids.Any(activeIds.Contains) : ids.All(activeIds.Contains);
@@ -249,9 +253,11 @@ public sealed class GameEnv
                         var ifa = (string?)li.Attribute("IfModActive");
                         var ifn = (string?)li.Attribute("IfModNotActive");
                         var ifany = (string?)li.Attribute("IfModActiveAny");
+                        if (!AssumeAll) {
                         if (ifa != null && !IsActive(ifa, activeIds, false)) continue;
                         if (ifany != null && !IsActive(ifany, activeIds, true)) continue;
                         if (ifn != null && IsActive(ifn, activeIds, true)) continue;
+                        }
                         var p = li.Value.Trim();
                         var full = (p == "" || p == "/" || p == ".") ? m.Root : Path.GetFullPath(Path.Combine(m.Root, p));
                         if (Directory.Exists(full) && !m.Folders.Contains(full)) m.Folders.Add(full);

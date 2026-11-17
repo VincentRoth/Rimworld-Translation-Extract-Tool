@@ -84,6 +84,7 @@ public sealed class LanguageWriter
                 if (!seenKeys.Add(e.Key)) continue;
                 used.Add(e.Key);
                 var (c, max, isShort) = ctx.ForDef(e);
+                if (e.Note != null) c = (string.IsNullOrEmpty(c) ? "" : c + " | ") + "Texte absent du XML : " + e.Note;
                 var soft = ctx.IsSoftDef(e);
                 var fr = official.Def(e.Folder, e.Key);
                 EmitEntry(sb, e.Key, e.Value, e.Items, c, max, isShort, e.Marked, fr, existing,
