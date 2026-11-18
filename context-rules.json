@@ -25,7 +25,7 @@
     { "def": "ThingDef", "field": "*", "context": "ThingDef : texte associé à l'objet" },
 
     // ---------- Terrain, plantes, ressources ----------
-    { "def": "TerrainDef", "field": "label", "context": "TerrainDef : nom de sol (menu Architecte, inspection)", "short": true },
+    { "def": "TerrainDef", "field": "label", "context": "TerrainDef : nom de sol (menu Architecte, inspection)", "short": true, "soft": true },
     { "def": "TerrainDef", "field": "description", "context": "TerrainDef : description du sol (infobulle Architecte)" },
     { "def": "ThingCategoryDef", "field": "label", "context": "Catégorie d'objets (filtres de stockage, d'ordres de fabrication) - court", "short": true },
     { "def": "DesignationCategoryDef", "field": "label", "context": "Onglet du menu Architecte (bouton) - très court", "short": true, "max": 16 },

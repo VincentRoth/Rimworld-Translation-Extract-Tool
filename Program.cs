@@ -12,6 +12,15 @@ Usage :
   TranslationExtractor --list-mods [filtre]
   TranslationExtractor --check <dossier|fichier>   vérifie une traduction (TODO, longueurs, placeholders)
   TranslationExtractor --calibrate <Core|Royalty|...>  compare l'extraction aux traductions FR officielles
+  TranslationExtractor --fill-tm <dossier|packageId> [--tm-global]
+                       remplit les TODO avec la traduction d'une entrée au même texte anglais (même mod, puis tout out\ avec --tm-global)
+  TranslationExtractor --label-tables <id[,id2]> [--tables <dossier>]
+                       décompose les libellés « matériau x motif » (Flooring Floors) et écrit/met à jour
+                       label-patterns.csv et label-materials.csv (défaut : out\<premier id>)
+  TranslationExtractor --fill-labels <id[,id2]> [--tables <dossier>]
+                       remplit les .label TODO à partir des deux tables traduites
+                       (--relabel : régénère aussi les libellés déjà générés, après correction des tables)
+     options de ces deux commandes : --label-folder TerrainDef (dossier DefInjected visé), --min-share 3
 
 Options :
   --version 1.6        version du jeu visée (défaut : version installée)
@@ -47,6 +56,7 @@ Options :
         string? target = null, outDir = null, with = null, lang = "French", placeholder = "TODO",
                 gameDir = null, workDir = null, version = null, checkPath = null, calibrate = null, listFilter = null, probe = null;
         bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false, noImplicit = false; string? dumpDef = null;
+        string? fillTm = null, labelTables = null, fillLabels = null, tablesDir = null; string labelFolder = "TerrainDef"; bool tmGlobal = false, relabel = false; int minShare = 3;
         for (int i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new Exception("Valeur manquante pour " + args[i]);
@@ -70,6 +80,14 @@ Options :
                 case "--check": checkPath = Next(); break;
                 case "--probe": probe = Next(); break;
                 case "--calibrate": calibrate = Next(); break;
+                case "--fill-tm": fillTm = Next(); break;
+                case "--tm-global": tmGlobal = true; break;
+                case "--label-tables": labelTables = Next(); break;
+                case "--fill-labels": fillLabels = Next(); break;
+                case "--tables": tablesDir = Next(); break;
+                case "--label-folder": labelFolder = Next(); break;
+                case "--min-share": minShare = int.Parse(Next()); break;
+                case "--relabel": relabel = true; break;
                 case "--list-mods": list = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) listFilter = args[++i]; break;
                 case "-h": case "--help": Console.WriteLine(Usage); return 0;
                 default: if (args[i].StartsWith("--")) { Console.Error.WriteLine("Option inconnue " + args[i]); return 2; } target = args[i]; break;
@@ -77,6 +95,16 @@ Options :
         }
 
         if (checkPath != null) return Checker.Run(checkPath);
+        // post-extraction helpers: they only read and write under out\ (or the given folder)
+        var outRoot = Path.Combine(ToolDir(), "out");
+        string[] Ids(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        try
+        {
+            if (fillTm != null) return TranslationMemory.Run(fillTm, outRoot, lang, placeholder, tmGlobal);
+            if (labelTables != null) return LabelGen.Tables(Ids(labelTables), outRoot, lang, placeholder, tablesDir, labelFolder, minShare);
+            if (fillLabels != null) return LabelGen.Fill(Ids(fillLabels), outRoot, lang, placeholder, tablesDir, labelFolder, minShare, relabel);
+        }
+        catch (Exception e) when (fillTm != null || labelTables != null || fillLabels != null) { Console.Error.WriteLine(e.Message); return 2; }
         if (probe != null)
         {
             var pe = new GameEnv(); pe.Scan(); var rr = new Report();
