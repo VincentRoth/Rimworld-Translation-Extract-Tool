@@ -91,7 +91,23 @@ public sealed class TypeIndex : IDisposable
         try { return t.BaseType; } catch { return null; }
     }
 
-    public static string FolderName(Type t)
+    // DefInjected folder = the def type that owns a DefDatabase, as the game resolves it: the highest
+    // non-abstract ancestor below Verse.Def (GenDefDatabase.AllDefTypesWithDatabases). A subclass folder
+    // (e.g. Vehicles.VehicleDef : ThingDef) is loaded but never matches a def, so its entries are lost.
+    public static Type DatabaseType(Type t)
+    {
+        var root = t;
+        for (var b = SafeBase(t); b != null && b.FullName != "Verse.Def"; b = SafeBase(b))
+            if (!b.IsAbstract) root = b;
+        return root;
+    }
+
+    public static string FolderName(Type t) => TypeFolderName(DatabaseType(t));
+
+    // Folder name used before the database-type fix; kept to merge older extractions into the right folder.
+    public static string LegacyFolderName(Type t) => TypeFolderName(t);
+
+    static string TypeFolderName(Type t)
     {
         var ns = t.Namespace ?? "";
         if (ns == "" || ns.StartsWith("Verse") || ns.StartsWith("RimWorld"))

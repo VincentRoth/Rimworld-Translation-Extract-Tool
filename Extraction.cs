@@ -7,6 +7,7 @@ namespace TranslationExtractor;
 public sealed class Entry
 {
     public string Folder = "";        // dossier DefInjected (type de def)
+    public string LegacyFolder = "";  // ancien nom de dossier (classe exacte), pour reprendre les traductions déjà saisies
     public string File = "";
     public string DefName = "";
     public string Path = "";
@@ -70,13 +71,14 @@ public sealed class Extraction
             if (t == null)
             {
                 if (unknownTypes.Add(typeName)) rep.UnknownTypes.Add($"{typeName} (mod {origin}) : type introuvable, repli sur les champs usuels");
-                ctx.Folder = typeName; ctx.TypeName = typeName; ctx.Chain = new() { typeName };
+                ctx.Folder = typeName; ctx.LegacyFolder = typeName; ctx.TypeName = typeName; ctx.Chain = new() { typeName };
                 foreach (var f in FallbackFields)
                     if (e[f] != null && !e[f]!.ChildNodes.OfType<XmlElement>().Any())
                         ctx.AddString(f, e[f]!.InnerText, true, "string");
                 continue;
             }
             ctx.Folder = TypeIndex.FolderName(t);
+            ctx.LegacyFolder = TypeIndex.LegacyFolderName(t);
             ctx.TypeName = t.Name;
             ctx.Chain = TypeIndex.BaseChainNames(t).ToList();
             WalkClass(e, t, "", ctx, 0);
@@ -146,7 +148,7 @@ public sealed class Extraction
     sealed class Ctx
     {
         public List<Entry> Defs = null!;
-        public string Folder = "", TypeName = "", DefName = "", File = "", Origin = "";
+        public string Folder = "", LegacyFolder = "", TypeName = "", DefName = "", File = "", Origin = "";
         public List<string> Chain = new();
 
         public void AddString(string path, string raw, bool marked, string ftype, string? note = null)
@@ -154,7 +156,7 @@ public sealed class Extraction
             var v = Norm(raw);
             Defs.Add(new Entry
             {
-                Folder = Folder, File = File, DefName = DefName, Path = path, Value = v,
+                Folder = Folder, LegacyFolder = LegacyFolder, File = File, DefName = DefName, Path = path, Value = v,
                 DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = ftype, Note = note,
             });
         }
@@ -162,7 +164,7 @@ public sealed class Extraction
         {
             Defs.Add(new Entry
             {
-                Folder = Folder, File = File, DefName = DefName, Path = path, Items = items.Select(Norm).ToList(),
+                Folder = Folder, LegacyFolder = LegacyFolder, File = File, DefName = DefName, Path = path, Items = items.Select(Norm).ToList(),
                 DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = "List<string>",
             });
         }
@@ -218,6 +220,9 @@ public sealed class Extraction
             var p = path == "" ? c.Name : path + "." + c.Name;
             // utiliser le nom réel du champ si alias
             if (f.Field.Name != c.Name) p = path == "" ? f.Field.Name : path + "." + f.Field.Name;
+            // BackstoryDef.PostLoad copies baseDesc into description before translations are injected:
+            // a "baseDesc" key would change a field the game no longer reads (official French uses "description").
+            if (path == "" && f.Field.Name == "baseDesc" && ctx.Chain.Contains("BackstoryDef") && el["description"] == null) p = "description";
 
             if (IsString(ft))
             {

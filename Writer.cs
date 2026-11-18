@@ -77,6 +77,13 @@ public sealed class LanguageWriter
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var sb = Header();
             var existing = opt.Fresh ? new Existing() : LoadExisting(path);
+            // anciens dossiers (classe exacte au lieu du type à base de données) : reprendre leurs entrées, puis les supprimer
+            var legacyPaths = g.Select(e => e.LegacyFolder).Where(f => f != "" && f != g.Key.Folder).Distinct()
+                .Select(f => Path.Combine(opt.OutDir, "DefInjected", f, g.Key.file)).Where(File.Exists).ToList();
+            if (!opt.Fresh)
+                foreach (var lp in legacyPaths)
+                    foreach (var kv in LoadExisting(lp).Map)
+                        if (!existing.Map.TryGetValue(kv.Key, out var cur) || IsPlaceholder(cur.inner)) existing.Map[kv.Key] = kv.Value;
             var used = new HashSet<string>();
             var seenKeys = new HashSet<string>();
             foreach (var e in g)
@@ -93,7 +100,20 @@ public sealed class LanguageWriter
             EmitObsolete(sb, existing, used);
             Footer(sb);
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+            foreach (var lp in legacyPaths)
+            {
+                File.Delete(lp);
+                var dir = Path.GetDirectoryName(lp)!;
+                if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+                rep.Warn($"Dossier DefInjected corrigé : {Path.GetFileName(dir)} -> {g.Key.Folder} ({g.Key.file}, traductions reprises)");
+            }
         }
+    }
+
+    bool IsPlaceholder(string inner)
+    {
+        var t = inner.Trim();
+        return t == "" || t == opt.Placeholder || Regex.IsMatch(t, @"^(\s*<li>\s*" + Regex.Escape(opt.Placeholder) + @"\s*</li>\s*)+$");
     }
 
     // -------------------- Keyed --------------------

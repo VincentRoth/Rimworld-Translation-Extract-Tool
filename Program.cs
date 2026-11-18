@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace TranslationExtractor;
 
@@ -135,6 +136,11 @@ Options :
         Console.WriteLine($"Cible : {mod}  ({mod.Root})  version {env.Version}");
 
         var extra = (with ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // Passe "toutes conditions" : charger aussi les mods installés que la cible vise (IfModActive de LoadFolders,
+        // MayRequire, PatchOperationFindMod), sinon ses patchs sur ces mods ne trouvent rien (ex. Intimacy sur VRE Highmate).
+        var autoWith = TargetedMods(env, mod);
+        var extraAll = extra.Concat(autoWith.Select(m => m.PackageId)).Distinct().ToArray();
+        if (autoWith.Count > 0) rep.Notes.Add($"Mods visés par les conditions, chargés pour la passe « toutes conditions » : {string.Join(", ", autoWith.Select(m => m.Name))}");
         var sw0 = sw;
         string tid = mod.PackageId;
 
@@ -144,7 +150,7 @@ Options :
         List<Entry> Collect(bool assumeAll, bool note)
         {
             GameEnv.AssumeAll = assumeAll;
-            var order = env.BuildLoadOrder(mod, extra, rep);
+            var order = env.BuildLoadOrder(mod, assumeAll ? extraAll : extra, rep);
             if (note) Console.WriteLine("Ordre : " + string.Join(" > ", order.Select(o => o.Name)));
             var pipe = new Pipeline(env, order, mod, rep);
             pipe.Load();
@@ -235,6 +241,39 @@ Options :
         Console.WriteLine($"Sortie : {langDir}");
         Console.WriteLine($"Rapport : {Path.Combine(outDir, "report.txt")}  ({sw.Elapsed.TotalSeconds:F1}s)");
         return 0;
+    }
+
+    /// <summary>Mods installés (hors officiels et cible) visés par les conditions du mod : IfModActive* de LoadFolders,
+    /// MayRequire/MayRequireAnyOf de ses XML, noms de PatchOperationFindMod.</summary>
+    static List<ModMeta> TargetedMods(GameEnv env, ModMeta mod)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lf = Path.Combine(mod.Root, "LoadFolders.xml");
+        if (File.Exists(lf))
+            foreach (Match m in Regex.Matches(File.ReadAllText(lf), "IfModActive(?:Any|All)?\\s*=\\s*\"([^\"]+)\""))
+                foreach (var x in m.Groups[1].Value.Split(',')) ids.Add(x.Trim());
+        var saved = GameEnv.AssumeAll; GameEnv.AssumeAll = true;
+        try { env.ComputeFolders(mod, new HashSet<string>()); } finally { GameEnv.AssumeAll = saved; }
+        foreach (var f in mod.Folders)
+            foreach (var sub in new[] { "Defs", "Patches" })
+            {
+                var d = Path.Combine(f, sub);
+                if (!Directory.Exists(d)) continue;
+                foreach (var file in Directory.EnumerateFiles(d, "*.xml", SearchOption.AllDirectories))
+                {
+                    string t; try { t = File.ReadAllText(file); } catch { continue; }
+                    foreach (Match m in Regex.Matches(t, "MayRequire(?:AnyOf)?\\s*=\\s*\"([^\"]+)\""))
+                        foreach (var x in m.Groups[1].Value.Split(',')) ids.Add(x.Trim());
+                    foreach (Match m in Regex.Matches(t, "<mods>(.*?)</mods>", RegexOptions.Singleline))
+                        foreach (Match li in Regex.Matches(m.Groups[1].Value, "<li>\\s*(.*?)\\s*</li>", RegexOptions.Singleline))
+                            names.Add(System.Net.WebUtility.HtmlDecode(li.Groups[1].Value));
+                }
+            }
+        var res = new List<ModMeta>();
+        foreach (var id in ids) { var m = env.FindByPackageId(id); if (m != null) res.Add(m); }
+        foreach (var n in names) { var m = env.Index.FirstOrDefault(i => i.Name.Equals(n, StringComparison.OrdinalIgnoreCase)); if (m != null) res.Add(m); }
+        return res.Where(m => !m.Official && m.Root != mod.Root).GroupBy(m => m.Root).Select(g => g.First()).ToList();
     }
 
     static void WriteReport(string outDir, ModMeta mod, List<Entry> entries, List<KeyedEntry> keyed, LanguageWriter w, Report rep, GameEnv env)

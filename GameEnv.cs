@@ -12,6 +12,7 @@ public sealed class ModMeta
     public List<string> Deps = new();
     public List<string> LoadAfter = new();
     public List<string> Folders = new();  // dossiers de chargement calculés
+    public List<string> SupportedVersions = new();  // <supportedVersions> de About.xml
 
     public override string ToString() => $"{Name} [{PackageId}]";
 }
@@ -118,6 +119,7 @@ public sealed class GameEnv
             AddIds(r.Element("loadAfter"), m.LoadAfter, false);
             AddIds(r.Element("loadAfterByVersion")?.Element("v" + Version), m.LoadAfter, false);
             AddIds(r.Element("forceLoadAfter"), m.LoadAfter, false);
+            foreach (var li in r.Element("supportedVersions")?.Elements("li") ?? Enumerable.Empty<XElement>()) m.SupportedVersions.Add(li.Value.Trim());
             return m;
         }
         catch { return null; }
@@ -126,7 +128,19 @@ public sealed class GameEnv
     public ModMeta? FindByPackageId(string id)
     {
         id = NormId(id);
-        return Index.FirstOrDefault(m => m.PackageId == id);
+        return BestCopy(Index.Where(m => m.PackageId == id));
+    }
+
+    /// <summary>Plusieurs copies d'un même mod (même packageId, ex. DMS 1.6 et DMS 1.7 publiés séparément) :
+    /// garder celle qui déclare la version visée, sinon la plus haute version déclarée &lt;= visée, sinon la première.</summary>
+    public ModMeta? BestCopy(IEnumerable<ModMeta> copies)
+    {
+        var list = copies.ToList();
+        if (list.Count <= 1 || !System.Version.TryParse(Version, out var cur)) return list.FirstOrDefault();
+        System.Version? Best(ModMeta m) => m.SupportedVersions
+            .Select(s => System.Version.TryParse(s, out var v) ? v : null).Where(v => v != null && v <= cur).Max();
+        return list.Where(m => m.Official).FirstOrDefault()
+            ?? list.OrderByDescending(m => m.SupportedVersions.Contains(Version) ? 1 : 0).ThenByDescending(m => Best(m)).First();
     }
 
     public ModMeta ResolveTarget(string arg)
@@ -161,9 +175,9 @@ public sealed class GameEnv
             if (Directory.Exists(d)) { var r = Pick(d); if (r != null) return r; }
         }
         var exact = Index.Where(m => m.Name.Equals(arg, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (exact.Count == 1 || exact.Count > 1 && exact.Any(x => x.Official)) return exact.FirstOrDefault(x => x.Official) ?? exact[0];
+        if (exact.Count == 1 || exact.Count > 1 && (exact.Any(x => x.Official) || exact.Select(x => x.PackageId).Distinct().Count() == 1)) return BestCopy(exact);
         var byName = Index.Where(m => m.Name.Contains(arg, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (byName.Count == 1) return byName[0];
+        if (byName.Count == 1 || byName.Count > 1 && byName.Select(x => x.PackageId).Distinct().Count() == 1) return BestCopy(byName);
         if (byName.Count > 1)
             throw new Exception("Nom ambigu :\n  " + string.Join("\n  ", byName.Select(f => $"{f.Name} [{f.PackageId}]")));
         throw new Exception($"Mod introuvable : {arg}");
@@ -245,7 +259,14 @@ public sealed class GameEnv
             try
             {
                 var doc = XDocument.Load(lf);
-                var node = doc.Root!.Element("v" + Version) ?? doc.Root.Element("default");
+                // comme ModContentPack.InitLoadFolders : la version courante, sinon la plus haute version déclarée <= courante,
+                // sinon "default" (ex. un LoadFolders limité à <v1.5> est utilisé tel quel en 1.6)
+                var node = doc.Root!.Element("v" + Version);
+                if (node == null && System.Version.TryParse(Version, out var curV))
+                    node = doc.Root.Elements()
+                        .Select(e => (e, ok: e.Name.LocalName.StartsWith("v") && System.Version.TryParse(e.Name.LocalName[1..], out var v) ? v : null))
+                        .Where(x => x.ok != null && x.ok <= curV).OrderByDescending(x => x.ok).Select(x => x.e).FirstOrDefault();
+                node ??= doc.Root.Element("default");
                 if (node != null)
                 {
                     foreach (var li in node.Elements("li"))
