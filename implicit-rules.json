@@ -19,6 +19,7 @@
     { "type": "PawnKindDef", "list": "lifeStages", "field": "labelFemalePlural", "from": "label|^label" },
 
     { "type": "PawnRelationDef", "field": "labelFemale", "from": "label" },
+    { "type": "RoyalTitleDef", "field": "labelFemale", "from": "label" },
     { "type": "FactionDef", "field": "leaderTitleFemale", "from": "leaderTitle", "fallback": "leader" },
     { "type": "HediffDef", "field": "labelNoun", "from": "label" },
     { "type": "MentalStateDef", "field": "beginLetterLabel", "from": "label" },

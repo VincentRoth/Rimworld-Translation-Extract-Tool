@@ -24,7 +24,8 @@ Options : `--version 1.6`, `--with id1,id2` (mods optionnels actifs), `--out`, `
 
 ## Comportement
 - Relancer fusionne : les traductions déjà saisies sont conservées, les EN modifiés sont signalés
-  (`ATTENTION`), les clés disparues passent en commentaire `OBSOLETE`.
+  (`ATTENTION`), les clés disparues passent en commentaire `OBSOLETE` (relus aux extractions suivantes, réutilisés si la clé revient). Un fichier que l'extraction ne produit plus est supprimé s'il ne contient que des `TODO`, sinon réécrit avec ses traductions en `OBSOLETE` (signalé dans `report.txt`).
+- Textes modifiés par les patchs du mod : comparaison des couples (clé, texte) avant et après ses patchs (une même clé TKey peut figurer deux fois dans une quête avec deux textes).
 - Textes ajoutés/modifiés par les patchs du mod sur d'autres mods/Core : fichiers `Patches_<fichier>.xml`.
 - `context-rules.json` : règles de contexte/longueur éditables (premier match gagne). Une règle avec `"soft": true` (noms d'objets : `ThingDef.label`, `labelPlural` ; noms de sols : `TerrainDef.label`) produit une « Limite souple » : `--check` signale un dépassement en `LONG (souple)` sans le compter comme erreur.
   Les limites sont des repères : une traduction naturelle et fidèle au vocabulaire officiel du jeu peut dépasser de quelques caractères (`TROP LONG` accepté, ex. VRE Genie). Raccourcir seulement les vrais débordements.
@@ -35,6 +36,8 @@ Options : `--version 1.6`, `--with id1,id2` (mods optionnels actifs), `--out`, `
 - **Toutes les conditions supposées remplies** (défaut) : deux passes, d'abord le mod seul (conditions respectées), puis avec tout actif (dossiers `IfModActive`, `MayRequire`, `FindMod`, CE…) ; l'union est extraite, la première passe l'emportant en cas de conflit (des variantes exclusives se remplacent l'une l'autre). `--respect-conditions` revient à une seule passe. Les patchs C# (ex. CE `MakeGunCECompatible`) restent non exécutés : leurs textes (outils `muzzle`/`head`, `Verb_ShootCE`…) ne peuvent pas être extraits.
 - **Textes absents du XML** (désactivables par `--no-implicit`) : défauts fixés par le constructeur (`leaderTitle = "leader"`, lus dans l'IL, champs `[MustTranslate]` seulement) et formes déduites d'un autre champ, listées dans `implicit-rules.json` (`titleFemale`, `labelPlural`/`labelMale`/`labelFemale` des PawnKindDef et de leurs `lifeStages`, `labelNoun`, `stuffAdjective`, libellé du verbe unique d'une arme = nom de l'objet…). Ces entrées portent « Texte absent du XML : … » ; laissées à `TODO`, elles ne sont pas copiées dans un pack.
 - Héritage XML : les `<li>` d'un enfant s'ajoutent à ceux du parent (comme `XmlInheritance`), sauf `Inherit="False"`.
+- Textes de quêtes (`SlateRef<string>`, ex. `<label TKey="LetterLabelShuttleArrived">`) : clé `<defName>.<TKey>.slateRef` comme la traduction officielle, sinon `<chemin>.slateRef` ; les références de variables (`$asker`) sont ignorées. Les objets polymorphes (`<root Class="QuestNode_Sequence">`, `genStep`, `node`…) sont parcourus selon leur classe réelle.
+- Textes que le mod ne donne que dans `Languages/English*/DefInjected` (absents du XML de ses defs, ex. Simple Improve) : ajoutés avec leur texte anglais (sauf clé indexée en doublon d'un champ déjà extrait).
 - `BackstoryDef` : le XML donne `baseDesc`, mais `PostLoad` le recopie dans `description` avant l'injection des traductions ; la clé extraite est donc `description` (comme la traduction officielle), une clé `baseDesc` ne serait jamais affichée.
 - Dossier `DefInjected` = type de def qui possède une base de données dans le jeu (ancêtre non abstrait le plus haut sous `Verse.Def`), comme `GenDefDatabase` : `Vehicles.VehicleDef`, `CombatExtended.AmmoDef`, `AlienRace.ThingDef_AlienRace` → `ThingDef` ; `GenelineGeneDef` → `GeneDef`. Un dossier au nom d'une sous-classe est chargé par le jeu mais ne trouve aucune def : ses traductions sont perdues. Relancer l'extraction (sans `--fresh`) déplace les anciennes traductions vers le bon dossier et supprime l'ancien fichier (signalé dans `report.txt`).
 
@@ -55,6 +58,7 @@ These commands only read and write the language files under `out\` (or a folder 
 extract.cmd --fill-tm ks.flooringfloors            (same mod only)
 extract.cmd --fill-tm lucius.floorpatch --tm-global (then every mod under out\)
 ```
+`extract.cmd --fill-tm all` does the same for every mod under `out\` in one run (one memory built from all of them before filling).
 For each `TODO`, copies the translation of another entry whose `EN:` comment is exactly the same text: first from the same mod, then (with `--tm-global`) from any mod under `out\`. Entries flagged `ATTENTION` (English changed since translation) are not used as a source. When the same English has several translations, the most frequent one is taken and the case is listed ("à harmoniser"). The report gives the number of filled entries and what is left: remaining `TODO`s, number of **distinct** English texts, and the most repeated ones. Workflow: translate one occurrence of each text, then run `--fill-tm` again. List entries (`<li>`) are not handled.
 
 ### Label generator for "material x pattern" mods: `--label-tables`, `--fill-labels`

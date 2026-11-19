@@ -172,14 +172,16 @@ Options :
             if (mod.Official) return entriesB.Where(e => e.Origin == tid).ToList();
             var own = entriesB.Where(e => e.Origin == tid).ToList();
             var foreign = entriesB.Where(e => e.Origin != tid).ToList();
-            var baseline = new Dictionary<string, string>();
+            // (key, text) pairs: a key can appear twice in one def with different texts (same TKey in two quest nodes),
+            // keeping one text per key would report the other one as changed by the mod
+            var baseline = new HashSet<string>();
             if (pipe.Patches.Any(p => p.Mod == mod) && foreign.Count > 0)
             {
                 var docA = pipe.Build(false);
-                foreach (var e in ext.ExtractDefs(docA, o => o != tid)) baseline[e.Folder + "/" + e.Key] = e.Sig;
+                foreach (var e in ext.ExtractDefs(docA, o => o != tid)) baseline.Add(e.Folder + "/" + e.Key + "\n" + e.Sig);
             }
-            else foreach (var e in foreign) baseline[e.Folder + "/" + e.Key] = e.Sig;
-            var changed = foreign.Where(e => !baseline.TryGetValue(e.Folder + "/" + e.Key, out var s) || s != e.Sig).ToList();
+            else foreach (var e in foreign) baseline.Add(e.Folder + "/" + e.Key + "\n" + e.Sig);
+            var changed = foreign.Where(e => !baseline.Contains(e.Folder + "/" + e.Key + "\n" + e.Sig)).ToList();
             if (note) rep.Notes.Add($"Defs du mod : {own.Count} entrées ; textes ajoutés/modifiés par ses patchs sur d'autres mods : {changed.Count}");
             return own.Concat(changed).ToList();
         }
@@ -199,6 +201,7 @@ Options :
         else entries = Collect(wantAll, true);
 
         if (calibrate != null) return Calibrate(env, mod, entries, rep);
+        if (!mod.Official) entries.AddRange(EnglishDefInjected(mod, entries, rep));
 
         // Keyed
         Dictionary<string, List<string>> usages = new();
@@ -234,6 +237,7 @@ Options :
         var writer = new LanguageWriter(wo, rules, new OfficialFr(env.GameDir), rep);
         writer.WriteDefs(entries, tid);
         writer.WriteKeyed(keyed);
+        writer.CleanOrphans();
 
         WriteReport(outDir, mod, entries, keyed, writer, rep, env);
         Console.WriteLine($"\n{writer.Written} entrées écrites ({entries.Count} defs, {keyed.Count} keyed), {writer.Preserved} traductions conservées, " +
@@ -241,6 +245,58 @@ Options :
         Console.WriteLine($"Sortie : {langDir}");
         Console.WriteLine($"Rapport : {Path.Combine(outDir, "report.txt")}  ({sw.Elapsed.TotalSeconds:F1}s)");
         return 0;
+    }
+
+    /// <summary>Textes que le mod ne met que dans sa traduction anglaise (Languages/English*/DefInjected), absents du XML
+    /// de ses defs (ex. Simple Improve : labels de WorkTypeDef) : le jeu les affiche, ils doivent être traduits.</summary>
+    static List<Entry> EnglishDefInjected(ModMeta mod, List<Entry> entries, Report rep)
+    {
+        var have = entries.Select(e => e.Folder + "/" + e.Key).ToHashSet();
+        // dossier d'une sous-classe -> type à base de données, comme nos extractions
+        var folderMap = entries.Where(e => e.LegacyFolder != "" && e.LegacyFolder != e.Folder).GroupBy(e => e.LegacyFolder).ToDictionary(g => g.Key, g => g.First().Folder);
+        // champs déjà extraits (def + dernier segment) : une clé anglaise indexée (stages.0.label) en serait un doublon
+        var leaves = entries.Select(e => e.Folder + "/" + e.DefName + "/" + e.Leaf).ToHashSet();
+        var indexed = new System.Text.RegularExpressions.Regex(@"\.\d+(\.|$)");
+        var res = new List<Entry>();
+        foreach (var f in mod.Folders)
+        {
+            var lang = Path.Combine(f, "Languages");
+            if (!Directory.Exists(lang)) continue;
+            foreach (var en in Directory.GetDirectories(lang).Where(d => Path.GetFileName(d).StartsWith("English", StringComparison.OrdinalIgnoreCase)))
+            {
+                var di = Path.Combine(en, "DefInjected");
+                if (!Directory.Exists(di)) continue;
+                foreach (var typeDir in Directory.GetDirectories(di))
+                {
+                    var folder = Path.GetFileName(typeDir);
+                    if (folderMap.TryGetValue(folder, out var mapped)) folder = mapped;
+                    foreach (var file in Directory.EnumerateFiles(typeDir, "*.xml", SearchOption.AllDirectories))
+                    {
+                        System.Xml.XmlDocument doc = new();
+                        try { doc.Load(file); } catch { continue; }
+                        foreach (var el in doc.DocumentElement!.ChildNodes.OfType<System.Xml.XmlElement>())
+                        {
+                            var key = el.Name; var dot = key.IndexOf('.');
+                            if (dot <= 0 || have.Contains(folder + "/" + key)) continue;
+                            if (indexed.IsMatch(key) && leaves.Contains(folder + "/" + key[..dot] + "/" + key[(key.LastIndexOf('.') + 1)..])) continue;
+                            have.Add(folder + "/" + key);
+                            var lis = el.ChildNodes.OfType<System.Xml.XmlElement>().Where(x => x.Name == "li").Select(x => x.InnerText).ToList();
+                            if (lis.Count == 0 && string.IsNullOrWhiteSpace(el.InnerText)) continue;
+                            res.Add(new Entry
+                            {
+                                Folder = folder, LegacyFolder = folder, File = Path.GetFileName(file), DefName = key[..dot], Path = key[(dot + 1)..],
+                                Value = lis.Count == 0 ? el.InnerText : "", Items = lis.Count > 0 ? lis : null,
+                                DefTypeName = folder.Contains('.') ? folder[(folder.LastIndexOf('.') + 1)..] : folder, TypeChain = new() { folder },
+                                Origin = mod.PackageId, Marked = true, FieldType = lis.Count > 0 ? "List<string>" : "string",
+                                Note = "texte fourni seulement par la traduction anglaise du mod (Languages/English/DefInjected)",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if (res.Count > 0) rep.Notes.Add($"Textes pris dans la traduction anglaise du mod (absents du XML des defs) : {res.Count}");
+        return res;
     }
 
     /// <summary>Mods installés (hors officiels et cible) visés par les conditions du mod : IfModActive* de LoadFolders,

@@ -173,6 +173,11 @@ public sealed class Extraction
     static string Norm(string s) => s.Replace("\r\n", "\n").Trim().Replace("\n", "\\n");
 
     static bool IsString(Type t) => t.FullName == "System.String";
+    static bool IsSlateRefString(Type t)
+    {
+        try { return t.IsGenericType && t.Name.StartsWith("SlateRef") && t.GetGenericArguments() is [var a] && IsString(a); }
+        catch { return false; }
+    }
     static bool IsListType(Type t, out Type elem)
     {
         elem = null!;
@@ -188,7 +193,9 @@ public sealed class Extraction
         v = v.Trim();
         if (v.Length == 0 || !v.Any(char.IsLetter)) return false;
         if (v.Count(c => c == '*' || c == '|') >= 6) return false;   // données sérialisées (ex. préréglage de colon), pas du texte
-        if (v.Contains('/') || v.Contains('\\') || v.EndsWith(".png") || v.EndsWith(".dll")) return false;
+        if (v.EndsWith(".png") || v.EndsWith(".dll")) return false;
+        // un chemin (Things/Item/X) n'a pas d'espace ; "price / kg" dans un champ nommé comme un texte en est un
+        if ((v.Contains('/') || v.Contains('\\')) && !(field != "" && TextyName.IsMatch(field) && v.Contains(' '))) return false;
         if (Regex.IsMatch(v, @"^[\w\-\.]+$"))                      // un seul mot
             return field != "" && TextyName.IsMatch(field) && !v.Contains('_') && !v.Contains('.');
         return v.Contains(' ') || v.Contains('{') || v.Contains('[');
@@ -224,6 +231,18 @@ public sealed class Extraction
             // a "baseDesc" key would change a field the game no longer reads (official French uses "description").
             if (path == "" && f.Field.Name == "baseDesc" && ctx.Chain.Contains("BackstoryDef") && el["description"] == null) p = "description";
 
+            // SlateRef<string> (textes des quêtes : lettres, infobulles…) : clé "<TKey>.slateRef" si le XML donne un TKey
+            // (forme de la traduction officielle, résolue par TKeySystem), sinon "<chemin>.slateRef" ; les références
+            // de variables ($asker…) ne sont pas du texte.
+            if (IsSlateRefString(ft))
+            {
+                if (c.ChildNodes.OfType<XmlElement>().Any()) continue;
+                var sv = c.InnerText.Trim();
+                if (sv.StartsWith("$") || !LooksLikeText(sv) || (!sv.Contains(' ') && c.GetAttribute("TKey") == "")) continue;
+                var tkey = c.GetAttribute("TKey");
+                ctx.AddString((tkey != "" ? tkey : p) + ".slateRef", c.InnerText, true, "SlateRef");
+                continue;
+            }
             if (IsString(ft))
             {
                 if (c.ChildNodes.OfType<XmlElement>().Any()) continue;
@@ -251,7 +270,10 @@ public sealed class Extraction
             }
             else if (CanRecurse(ft))
             {
-                WalkClass(c, ft, p, ctx, depth + 1);
+                // objet polymorphe (ex. <root Class="QuestNode_Sequence">) : parcourir la classe réelle
+                var cls = c.GetAttribute("Class");
+                var real = cls != "" ? types.Resolve(cls) ?? ft : ft;
+                WalkClass(c, real, p, ctx, depth + 1);
             }
         }
         AddCodeDefaults(type, path, present, ctx);

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -19,6 +19,41 @@ public sealed class LanguageWriter
     readonly OfficialFr official;
     readonly Report rep;
     public int Written, Preserved, Changed, Obsolete;
+    readonly HashSet<string> writtenPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Files of a previous run that this run did not produce (all their keys disappeared): deleted when they only hold
+    /// placeholders, otherwise rewritten with their translations as OBSOLETE comments (kept for later runs).
+    /// </summary>
+    public void CleanOrphans()
+    {
+        if (opt.Fresh) return;
+        foreach (var sub in new[] { "DefInjected", "Keyed" })
+        {
+            var dir = Path.Combine(opt.OutDir, sub);
+            if (!Directory.Exists(dir)) continue;
+            foreach (var path in Directory.EnumerateFiles(dir, "*.xml", SearchOption.AllDirectories).ToList())
+            {
+                if (writtenPaths.Contains(Path.GetFullPath(path))) continue;
+                var existing = LoadExisting(path);
+                if (existing.Map.Values.All(v => IsPlaceholder(v.inner)))
+                {
+                    File.Delete(path);
+                    var d = Path.GetDirectoryName(path)!;
+                    if (!Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d);
+                    rep.Warn($"Fichier plus produit par l'extraction, supprimé (aucune traduction) : {Path.GetRelativePath(opt.OutDir, path)}");
+                }
+                else
+                {
+                    var sb = Header();
+                    EmitObsolete(sb, existing, new HashSet<string>());
+                    Footer(sb);
+                    File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+                    rep.Warn($"Fichier plus produit par l'extraction, traductions gardées en OBSOLETE : {Path.GetRelativePath(opt.OutDir, path)}");
+                }
+            }
+        }
+    }
 
     public LanguageWriter(WriterOptions opt, ContextResolver ctx, OfficialFr official, Report rep)
     { this.opt = opt; this.ctx = ctx; this.official = official; this.rep = rep; }
@@ -49,6 +84,13 @@ public sealed class LanguageWriter
                 {
                     var t = c.Value.Trim();
                     if (t.StartsWith("EN:")) en = t[3..].Trim();
+                    else if (t.StartsWith("OBSOLETE"))
+                    {
+                        // traduction d'une clé disparue : la relire pour qu'elle survive aux réextractions suivantes
+                        // (et soit réutilisée si la clé revient)
+                        var m = Regex.Match(t, @"<(?<k>[^>\s/]+)>(?<v>.*)</\k<k>>", RegexOptions.Singleline);
+                        if (m.Success && !ex.Map.ContainsKey(m.Groups["k"].Value)) ex.Map[m.Groups["k"].Value] = (m.Groups["v"].Value, null);
+                    }
                 }
                 else if (n is XElement e)
                 {
@@ -99,7 +141,7 @@ public sealed class LanguageWriter
             }
             EmitObsolete(sb, existing, used);
             Footer(sb);
-            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true)); writtenPaths.Add(Path.GetFullPath(path));
             foreach (var lp in legacyPaths)
             {
                 File.Delete(lp);
@@ -140,7 +182,7 @@ public sealed class LanguageWriter
             }
             EmitObsolete(sb, existing, used);
             Footer(sb);
-            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true)); writtenPaths.Add(Path.GetFullPath(path));
         }
     }
 

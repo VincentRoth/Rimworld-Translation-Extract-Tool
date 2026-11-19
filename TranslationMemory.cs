@@ -114,6 +114,7 @@ public static class TranslationMemory
 {
     public static int Run(string target, string outRoot, string lang, string placeholder, bool global)
     {
+        if (target.Equals("all", StringComparison.OrdinalIgnoreCase) && !Directory.Exists(target)) return RunAll(outRoot, lang, placeholder);
         var files = LangFile.FindFiles(target, outRoot, lang).Select(p => LangFile.Load(p, placeholder)).ToList();
         var targetPaths = files.Select(f => System.IO.Path.GetFullPath(f.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -157,6 +158,58 @@ public static class TranslationMemory
                               " : traduire une occurrence de chacun puis relancer --fill-tm remplit les autres.");
             foreach (var g in groups.Take(10)) Console.WriteLine($"  {g.Count(),5} x  {(g.Key.Length > 90 ? g.Key[..90] + "…" : g.Key)}");
         }
+        if (conflicts > 0)
+        {
+            Console.WriteLine($"{conflicts} entrées remplies alors que le même anglais a plusieurs traductions (à harmoniser) :");
+            foreach (var s in conflictList) Console.WriteLine("  " + s);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// "--fill-tm all": every mod under out\ at once, with one memory built from all of them
+    /// (same as running --fill-tm --tm-global on each mod, without reloading out\ for every mod).
+    /// The memory is built before filling, so a value written by this run is never reused in the same run.
+    /// </summary>
+    static int RunAll(string outRoot, string lang, string placeholder)
+    {
+        var byMod = Directory.EnumerateDirectories(outRoot).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+            .Select(d => (mod: System.IO.Path.GetFileName(d), dir: System.IO.Path.Combine(d, "Languages", lang)))
+            .Where(x => Directory.Exists(x.dir))
+            .Select(x => (x.mod, files: Directory.EnumerateFiles(x.dir, "*.xml", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).Select(p => LangFile.Load(p, placeholder)).ToList()))
+            .ToList();
+        var global = BuildMemory(byMod.SelectMany(m => m.files).ToList());
+
+        int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0, mods = 0;
+        var conflictList = new List<string>();
+        foreach (var (mod, files) in byMod)
+        {
+            var local = BuildMemory(files);
+            int before = fromLocal + fromOther;
+            foreach (var f in files)
+            {
+                foreach (var it in f.Items.Where(i => i.IsTodo).ToList())
+                {
+                    todo++;
+                    if (it.En == null) continue;
+                    Candidate? c = null; string scope = "";
+                    if (local.TryGetValue(it.En, out var lc)) { c = lc; scope = "même mod"; fromLocal++; }
+                    else if (global.TryGetValue(it.En, out var oc)) { c = oc; scope = "autre mod : " + oc.Source; fromOther++; }
+                    if (c == null) continue;
+                    if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{it.En}  →  {c.Value}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
+                    f.Set(it, c.Value, $"Auto (mémoire de traduction, {scope}) : à relire");
+                }
+                f.Save();
+            }
+            if (fromLocal + fromOther > before) mods++;
+        }
+
+        Console.WriteLine($"Mémoire de traduction (tout out\\) : {global.Count} textes anglais déjà traduits, {byMod.Count} mods");
+        Console.WriteLine($"Entrées TODO : {todo}  ->  remplies : {fromLocal + fromOther} dans {mods} mods (même mod : {fromLocal}, autres mods : {fromOther}), restantes : {todo - fromLocal - fromOther}");
+        var left = byMod.SelectMany(m => m.files).SelectMany(f => f.Items).Where(i => i.IsTodo).ToList();
+        var groups = left.Where(i => i.En != null).GroupBy(i => i.En!).OrderByDescending(g => g.Count()).ToList();
+        Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts (+ listes <li> non gérées).");
+        foreach (var g in groups.Take(15)) Console.WriteLine($"  {g.Count(),5} x  {(g.Key.Length > 90 ? g.Key[..90] + "…" : g.Key)}");
         if (conflicts > 0)
         {
             Console.WriteLine($"{conflicts} entrées remplies alors que le même anglais a plusieurs traductions (à harmoniser) :");
