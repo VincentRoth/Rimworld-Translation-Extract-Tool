@@ -238,6 +238,9 @@ Options :
         writer.WriteDefs(entries, tid);
         writer.WriteKeyed(keyed);
         writer.CleanOrphans();
+        var strings = StringsFiles.Extract(mod, langDir, placeholder, fresh, entries, rep);
+        if (strings.Files > 0) Console.WriteLine($"Fichiers de mots (Strings) : {strings.Files} fichiers, {strings.Lines} lignes, {strings.Preserved} traductions reprises" +
+                                                 (strings.Manual > 0 ? $", {strings.Manual} restructurés à la main (non réécrits)" : ""));
 
         WriteReport(outDir, mod, entries, keyed, writer, rep, env);
         Console.WriteLine($"\n{writer.Written} entrées écrites ({entries.Count} defs, {keyed.Count} keyed), {writer.Preserved} traductions conservées, " +

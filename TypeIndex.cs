@@ -9,6 +9,7 @@ public sealed class FieldInfoEx
 {
     public FieldInfo Field = null!;
     public bool MustTranslate, NoTranslate;
+    public bool CanChangeCount;   // [TranslationCanChangeCount] : traduction par liste entière (<li>) autorisée
     public int? HandlePriority;   // null = pas un handle
 }
 
@@ -148,6 +149,7 @@ public sealed class TypeIndex : IDisposable
                         {
                             case "Verse.MustTranslateAttribute": ex.MustTranslate = true; break;
                             case "Verse.NoTranslateAttribute": ex.NoTranslate = true; break;
+                            case "Verse.TranslationCanChangeCountAttribute": ex.CanChangeCount = true; break;
                             case "Verse.TranslationHandleAttribute":
                                 ex.HandlePriority = 0;
                                 foreach (var na in a.NamedArguments)
@@ -220,12 +222,22 @@ public sealed class TypeIndex : IDisposable
                     if (m.GetParameters().Count != 0) continue;
                     var il = pe.GetMethodBody(m.RelativeVirtualAddress).GetILBytes();
                     if (il == null) continue;
-                    for (int i = 0; i < il.Length - 5; i++)
+                    // Exact pattern "ldtoken T; call GetTypeFromHandle; stfld <fieldName>": a bare 0xD0 byte scan also
+                    // matched operand bytes (e.g. a float constant) and returned an unrelated type (ThingComp for CompLaunchable).
+                    for (int i = 0; i + 15 <= il.Length; i++)
                     {
-                        if (il[i] != 0xD0) continue;
+                        if (il[i] != 0xD0 || il[i + 5] != 0x28 || il[i + 10] != 0x7D) continue;
                         int tok = BitConverter.ToInt32(il, i + 1);
                         var table = tok >> 24;
                         if (table != 0x01 && table != 0x02) continue;
+                        var fh = MetadataTokens.EntityHandle(BitConverter.ToInt32(il, i + 11));
+                        string? fname = fh.Kind switch
+                        {
+                            HandleKind.FieldDefinition => md.GetString(md.GetFieldDefinition((FieldDefinitionHandle)fh).Name),
+                            HandleKind.MemberReference => md.GetString(md.GetMemberReference((MemberReferenceHandle)fh).Name),
+                            _ => null
+                        };
+                        if (fname != fieldName) continue;
                         var h = MetadataTokens.EntityHandle(tok);
                         if (h.Kind == HandleKind.TypeDefinition) return md.GetString(md.GetTypeDefinition((TypeDefinitionHandle)h).Name);
                         if (h.Kind == HandleKind.TypeReference) return md.GetString(md.GetTypeReference((TypeReferenceHandle)h).Name);

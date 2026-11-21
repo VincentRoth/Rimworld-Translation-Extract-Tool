@@ -19,6 +19,7 @@ public sealed class Entry
     public bool Marked;               // champ [MustTranslate]
     public string FieldType = "";
     public string? Note;              // origine d'une valeur absente du XML (défaut du code, forme optionnelle)
+    public string? Prefill;           // nouvelle entrée pré-remplie avec l'anglais (pas de TODO) ; texte = explication en commentaire
     public string Key => DefName + "." + Path;
     public string Leaf => Path.Contains('.') ? Path[(Path.LastIndexOf('.') + 1)..] : Path;
     public string Sig => Items != null ? string.Join("\u0001", Items) : Value;
@@ -160,17 +161,21 @@ public sealed class Extraction
                 DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = ftype, Note = note,
             });
         }
-        public void AddList(string path, List<string> items, bool marked)
+        public void AddList(string path, List<string> items, bool marked, string? prefill = null)
         {
             Defs.Add(new Entry
             {
                 Folder = Folder, LegacyFolder = LegacyFolder, File = File, DefName = DefName, Path = path, Items = items.Select(Norm).ToList(),
-                DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = "List<string>",
+                DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = "List<string>", Prefill = prefill,
             });
         }
     }
 
     static string Norm(string s) => s.Replace("\r\n", "\n").Trim().Replace("\n", "\\n");
+
+    public const string RulesFilesHint = "fichiers de mots (symbole->chemin sous Strings/, sans .txt). Pré-rempli avec l'anglais : " +
+        "les listes traduites vont dans Strings/ au même chemin. À modifier seulement pour découper une liste (féminin, élision, pluriel), " +
+        "comme l'officiel (GlobalUtility : BusinessType_Feminine->Words/Nouns/BusinessTypes_Feminine), en adaptant aussi rulesStrings";
 
     static bool IsString(Type t) => t.FullName == "System.String";
     static bool IsSlateRefString(Type t)
@@ -254,8 +259,21 @@ public sealed class Extraction
                 if (IsString(et))
                 {
                     var items = lis.Select(x => x.InnerText).ToList();
+                    // RulePack.rulesFiles ("symbole->Words/…") : chemins des fichiers de mots, remplaçables en entier par
+                    // DefInjected ([TranslationCanChangeCount]) comme le fait l'officiel pour découper une liste (genre,
+                    // élision). Pré-rempli avec l'anglais : à modifier seulement pour restructurer les listes.
+                    if (items.Count > 0 && f.CanChangeCount && f.Field.Name == "rulesFiles" && f.Field.DeclaringType?.Name == "RulePack")
+                    {
+                        ctx.AddList(p, items, true, RulesFilesHint);
+                        continue;
+                    }
                     if (items.Count > 0 && !f.NoTranslate && (f.MustTranslate || (IncludeUnmarked && items.Any(x => LooksLikeText(x)))))
-                        ctx.AddList(p, items, f.MustTranslate);
+                    {
+                        // The game accepts a whole <li> list only on [TranslationCanChangeCount] fields; elsewhere
+                        // (GeneDef.customEffectDescriptions, TipSetDef.tips…) it rejects it: one key per index, as in the official French.
+                        if (f.CanChangeCount) ctx.AddList(p, items, f.MustTranslate);
+                        else for (int i = 0; i < items.Count; i++) ctx.AddString(p + "." + i, lis[i].InnerText, f.MustTranslate, "string");
+                    }
                     else if (items.Count > 0 && !f.NoTranslate)
                     {
                         var k = f.Field.DeclaringType?.Name + "." + f.Field.Name;

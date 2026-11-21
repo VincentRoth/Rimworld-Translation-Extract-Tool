@@ -137,7 +137,7 @@ public sealed class LanguageWriter
                 var soft = ctx.IsSoftDef(e);
                 var fr = official.Def(e.Folder, e.Key);
                 EmitEntry(sb, e.Key, e.Value, e.Items, c, max, isShort, e.Marked, fr, existing,
-                    $"{e.DefTypeName}.{e.Path}", soft);
+                    $"{e.DefTypeName}.{e.Path}", soft, e.Prefill);
             }
             EmitObsolete(sb, existing, used);
             Footer(sb);
@@ -197,8 +197,9 @@ public sealed class LanguageWriter
     static void Footer(StringBuilder sb) => sb.Append("</LanguageData>\n");
 
     void EmitEntry(StringBuilder sb, string key, string value, List<string>? items, string? context, int? max, bool isShort,
-        bool marked, string? frOfficial, Existing existing, string? where, bool soft = false)
+        bool marked, string? frOfficial, Existing existing, string? where, bool soft = false, string? prefill = null)
     {
+        if (prefill != null) context = (string.IsNullOrEmpty(context) ? "" : context + " | ") + prefill;
         string enText = items != null ? string.Join(" | ", items) : value;
         sb.Append("  <!-- EN: ").Append(San(items != null
             ? "\n" + string.Join("\n", items.Select(i => "    <li>" + i + "</li>")) + "\n  "
@@ -236,6 +237,8 @@ public sealed class LanguageWriter
         {
             var exInner = ex.inner.Trim();
             bool isPlaceholder = exInner == opt.Placeholder || (opt.PrefillEn && exInner == Esc(enText)) || exInner.Contains("<li>" + opt.Placeholder + "</li>");
+            // pré-remplissage jamais modifié : suivre l'anglais s'il a changé (sinon on garderait l'ancien anglais)
+            if (prefill != null && items != null && ex.en != null && LiValues(exInner).SequenceEqual(LiValues(ex.en))) isPlaceholder = true;
             if (!isPlaceholder && exInner != "")
             {
                 keep = ex.inner;
@@ -253,13 +256,17 @@ public sealed class LanguageWriter
         {
             sb.Append('\n');
             foreach (var i in items)
-                sb.Append("    <li>").Append(opt.PrefillEn ? Esc(i) : opt.Placeholder).Append("</li>\n");
+                sb.Append("    <li>").Append(opt.PrefillEn || prefill != null ? Esc(i) : opt.Placeholder).Append("</li>\n");
             sb.Append("  ");
         }
-        else sb.Append(opt.PrefillEn ? Esc(value) : opt.Placeholder);
+        else sb.Append(opt.PrefillEn || prefill != null ? Esc(value) : opt.Placeholder);
         sb.Append("</").Append(key).Append(">\n\n");
         Written++;
     }
+
+    /// <summary>Valeurs des &lt;li&gt; d'un contenu XML ou d'un commentaire EN (texte brut, entités décodées).</summary>
+    static List<string> LiValues(string s) =>
+        Regex.Matches(s, @"<li>(.*?)</li>", RegexOptions.Singleline).Select(m => System.Net.WebUtility.HtmlDecode(m.Groups[1].Value).Trim()).ToList();
 
     void EmitObsolete(StringBuilder sb, Existing existing, HashSet<string> used)
     {
@@ -317,6 +324,9 @@ public static class Checker
         }
         Console.WriteLine($"\n{total} entrées : {todo} TODO, {tooLong} trop longues, {missingPh} placeholders manquants"
             + (softLong > 0 ? $" ({softLong} noms d'objet au-delà de la limite souple, à apprécier)." : "."));
-        return todo + tooLong + missingPh == 0 ? 0 : 1;
+        // fichiers de mots (Strings/*.txt) : un fichier n'est copié dans le pack que sans TODO
+        var (txtFiles, txtTodo) = Directory.Exists(path) ? StringsFiles.CountTodo(path, "TODO") : (0, 0);
+        if (txtFiles > 0) Console.WriteLine($"Fichiers de mots : {txtFiles} fichiers, {txtTodo} lignes TODO.");
+        return todo + tooLong + missingPh + txtTodo == 0 ? 0 : 1;
     }
 }
