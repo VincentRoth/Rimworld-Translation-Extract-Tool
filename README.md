@@ -28,6 +28,9 @@ Options : `--version 1.6`, `--with id1,id2` (mods optionnels actifs), `--out`, `
 - Textes modifiés par les patchs du mod : comparaison des couples (clé, texte) avant et après ses patchs (une même clé TKey peut figurer deux fois dans une quête avec deux textes).
 - Textes ajoutés/modifiés par les patchs du mod sur d'autres mods/Core : fichiers `Patches_<fichier>.xml`.
 - `context-rules.json` : règles de contexte/longueur éditables (premier match gagne). Une règle avec `"soft": true` (noms d'objets : `ThingDef.label`, `labelPlural` ; noms de sols : `TerrainDef.label`) produit une « Limite souple » : `--check` signale un dépassement en `LONG (souple)` sans le compter comme erreur.
+  Emplacements de Sandy's RPG Style Inventory (`ItemSlotDef.label`, affichés en infobulle) : limite souple (21/11/2026).
+- Texte anglais vide : l'entrée est écrite vide, pas `TODO` (rien à traduire) ; `Status-Translations.ps1` et `Sync-Translations.ps1` la comptent comme traduite.
+- `--check` ne signale pas un `{X_possessive}` absent (le français s'en passe souvent, Conventions §6), ni un `{X_pronoun}` / `{X_objective}` remplacé par une forme `{X_gender ? … }`.
   Les limites sont des repères : une traduction naturelle et fidèle au vocabulaire officiel du jeu peut dépasser de quelques caractères (`TROP LONG` accepté, ex. VRE Genie). Raccourcir seulement les vrais débordements.
 - `report.txt` : comptes, patchs C# non exécutés, types introuvables, champs texte non marqués ignorés.
   Ces champs ignorés sont souvent des références (ex. `FactionDef.dialogFactionGreeting*` contient le defName d'un `RulePackDef`, traduit avec celui-ci) : vérifier dans le XML avant de parler de texte manquant.

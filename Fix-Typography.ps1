@@ -6,7 +6,7 @@
     For every Languages\French XML file under the given folder, only the text of elements is changed
     (never comments, so the "EN:" lines stay as they are, never "TODO" entries):
       - straight quotes "..." become French quotes with non-breaking spaces;
-      - a non-breaking space (U+00A0) is put inside French quotes and before : ; ! ? (a plain space
+      - a non-breaking space (U+00A0) is put inside French quotes, before : ; ! ? and before % after a number (a plain space
         there is replaced, a missing one is added);
       - curly apostrophes become straight ones, the ellipsis character becomes "...";
       - JobDef reportString starts with a lowercase letter (the game inserts it mid-sentence), unless the
@@ -66,6 +66,8 @@ function Fix-Text([string]$text) {
     $s = [regex]::Replace($s, '(?<=[^\s!?;:])[   ]*(?=[;!?])', $nb)          # word; word! word? (first of a run)
     $s = [regex]::Replace($s, '(?<=[^\s\d!?;:])[   ]*:(?!//)', ($nb + ':'))  # word: -> word :  (10:30 untouched)
     $s = [regex]::Replace($s, '(?<=\d)[  ]+:', ($nb + ':'))                      # "3 :" keeps its space, as nbsp
+    # 4. Non-breaking space before % after a number or a symbol ("25%", "{0}%" -> "25 %", "{0} %"); not "%%", "%s".
+    $s = [regex]::Replace($s, ('(?<=[\d' + $mark + '])[ ' + [char]0x202F + ']*%(?![\w%])'), ($nb + '%'))
     return (Restore $s $tokens)
 }
 

@@ -259,6 +259,7 @@ public sealed class LanguageWriter
                 sb.Append("    <li>").Append(opt.PrefillEn || prefill != null ? Esc(i) : opt.Placeholder).Append("</li>\n");
             sb.Append("  ");
         }
+        else if (value.Trim() == "") { /* empty English text: nothing to translate, left empty (not TODO) */ }
         else sb.Append(opt.PrefillEn || prefill != null ? Esc(value) : opt.Placeholder);
         sb.Append("</").Append(key).Append(">\n\n");
         Written++;
@@ -316,7 +317,7 @@ public static class Checker
                         if (max != null && val.Length > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } }
                         if (en != null)
                             foreach (var ph in ContextResolver.FindPlaceholders(en))
-                                if (ph.StartsWith("{") && !val.Contains(ph)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {e.Name.LocalName} manque {ph}"); }
+                                if (ph.StartsWith("{") && !val.Contains(ph) && !PronounReplaced(ph, val)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {e.Name.LocalName} manque {ph}"); }
                     }
                     en = null; max = null; soft = false;
                 }
@@ -328,5 +329,18 @@ public static class Checker
         var (txtFiles, txtTodo) = Directory.Exists(path) ? StringsFiles.CountTodo(path, "TODO") : (0, 0);
         if (txtFiles > 0) Console.WriteLine($"Fichiers de mots : {txtFiles} fichiers, {txtTodo} lignes TODO.");
         return todo + tooLong + missingPh + txtTodo == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// A pronoun symbol of the English text may legitimately be absent from the French one:
+    /// possessives are often dropped (Conventions §6), and {X_pronoun}/{X_objective} are often
+    /// replaced by the gender form {X_gender ? il : elle}.
+    /// </summary>
+    static bool PronounReplaced(string ph, string val)
+    {
+        var m = Regex.Match(ph, @"^\{(\w+?)_(pronoun|objective|possessive|objectivePronoun|possessivePronoun|reflexive)\}$");
+        if (!m.Success) return false;
+        if (m.Groups[2].Value.StartsWith("possessive")) return true;
+        return val.Contains("{" + m.Groups[1].Value + "_gender");
     }
 }

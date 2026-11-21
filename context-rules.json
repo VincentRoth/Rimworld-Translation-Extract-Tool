@@ -14,6 +14,8 @@
     // ---------- Objets / bâtiments ----------
     { "def": "ThingDef", "field": "label", "context": "ThingDef : nom de l'objet/bâtiment/créature (menu Architecte, inventaire, titre de sélection, infobulles) - minuscule en anglais, pas de point", "short": true, "soft": true },
     { "def": "ThingDef", "field": "labelPlural", "context": "ThingDef : pluriel du nom (piles, listes, messages)", "short": true, "soft": true },
+    // Sandy's RPG Style Inventory : nom d'emplacement affiché en infobulle, tel quel (majuscule initiale, Conventions §2)
+    { "def": "ItemSlotDef", "field": "label", "context": "ItemSlotDef (RPG Style Inventory) : nom d'emplacement d'équipement, affiché en infobulle tel quel - majuscule initiale", "short": true, "soft": true },
     { "def": "ThingDef", "field": "description", "context": "ThingDef : description (fiche d'info, infobulle du menu Architecte) - longueur libre" },
     { "def": "ThingDef", "field": "stuffProps.stuffAdjective", "context": "Adjectif de matériau placé devant le nom (ex. « en bois ») - très court", "short": true },
     { "def": "ThingDef", "field": "tools.*.label", "context": "Nom d'une attaque de mêlée (journal de combat, fiche d'info) - très court", "short": true },
