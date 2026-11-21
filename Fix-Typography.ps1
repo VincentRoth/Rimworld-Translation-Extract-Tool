@@ -27,11 +27,13 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Path = (Join-Path $PSScriptRoot 'out'),
+    [string]$Path,
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = 'Stop'
+# $PSScriptRoot is empty in a param default under "powershell -File" (PS 5.1): resolved here instead
+if (-not $Path) { $Path = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'out' }
 $nb = [string][char]0x00A0
 $lq = [string][char]0x00AB   # opening French quote
 $rq = [string][char]0x00BB   # closing French quote

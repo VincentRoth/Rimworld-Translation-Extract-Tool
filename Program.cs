@@ -22,6 +22,14 @@ Usage :
                        remplit les .label TODO à partir des deux tables traduites
                        (--relabel : régénère aussi les libellés déjà générés, après correction des tables)
      options de ces deux commandes : --label-folder TerrainDef (dossier DefInjected visé), --min-share 3
+  TranslationExtractor --export-todo <id[,id2]|all> [--to <fichier>] [--batch 300]
+                       écrit les entrées TODO dans une feuille texte (défaut : feuilles\todo_<id>_<date>.txt),
+                       une ligne « id || fichier || clé || » par entrée, l'anglais et le contexte au-dessus
+  TranslationExtractor --import <feuille>
+                       recopie les traductions saisies dans la feuille (entrées encore à TODO seulement)
+  TranslationExtractor --compare-ref <id> --ref <mod de traduction|ID Workshop|dossier>
+                       compare notre traduction à une traduction tierce : libellés courts différents,
+                       clés que seule la référence traduit (écrit out\<id>\compare-ref.csv)
 
 Options :
   --version 1.6        version du jeu visée (défaut : version installée)
@@ -58,6 +66,7 @@ Options :
                 gameDir = null, workDir = null, version = null, checkPath = null, calibrate = null, listFilter = null, probe = null;
         bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false, noImplicit = false; string? dumpDef = null;
         string? fillTm = null, labelTables = null, fillLabels = null, tablesDir = null; string labelFolder = "TerrainDef"; bool tmGlobal = false, relabel = false; int minShare = 3;
+        string? exportTodo = null, importSheet = null, sheetFile = null, compareRef = null, refArg = null; int batch = 0;
         for (int i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new Exception("Valeur manquante pour " + args[i]);
@@ -89,6 +98,12 @@ Options :
                 case "--label-folder": labelFolder = Next(); break;
                 case "--min-share": minShare = int.Parse(Next()); break;
                 case "--relabel": relabel = true; break;
+                case "--export-todo": exportTodo = Next(); break;
+                case "--to": sheetFile = Next(); break;
+                case "--batch": batch = int.Parse(Next()); break;
+                case "--import": importSheet = Next(); break;
+                case "--compare-ref": compareRef = Next(); break;
+                case "--ref": refArg = Next(); break;
                 case "--list-mods": list = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) listFilter = args[++i]; break;
                 case "-h": case "--help": Console.WriteLine(Usage); return 0;
                 default: if (args[i].StartsWith("--")) { Console.Error.WriteLine("Option inconnue " + args[i]); return 2; } target = args[i]; break;
@@ -104,8 +119,10 @@ Options :
             if (fillTm != null) return TranslationMemory.Run(fillTm, outRoot, lang, placeholder, tmGlobal);
             if (labelTables != null) return LabelGen.Tables(Ids(labelTables), outRoot, lang, placeholder, tablesDir, labelFolder, minShare);
             if (fillLabels != null) return LabelGen.Fill(Ids(fillLabels), outRoot, lang, placeholder, tablesDir, labelFolder, minShare, relabel);
+            if (exportTodo != null) return Worksheet.Export(Ids(exportTodo), outRoot, lang, placeholder, sheetFile, batch, ToolDir());
+            if (importSheet != null) return Worksheet.Import(importSheet, outRoot, lang, placeholder);
         }
-        catch (Exception e) when (fillTm != null || labelTables != null || fillLabels != null) { Console.Error.WriteLine(e.Message); return 2; }
+        catch (Exception e) when (fillTm != null || labelTables != null || fillLabels != null || exportTodo != null || importSheet != null) { Console.Error.WriteLine(e.Message); return 2; }
         if (probe != null)
         {
             var pe = new GameEnv(); pe.Scan(); var rr = new Report();
@@ -124,6 +141,12 @@ Options :
             foreach (var m in env.Index.Where(m => listFilter == null || m.Name.Contains(listFilter, StringComparison.OrdinalIgnoreCase) || m.PackageId.Contains(listFilter, StringComparison.OrdinalIgnoreCase)))
                 Console.WriteLine($"{m.PackageId,-45} {m.Name}   {(m.Official ? "(officiel)" : m.Root)}");
             return 0;
+        }
+        if (compareRef != null)
+        {
+            if (refArg == null) { Console.Error.WriteLine("--compare-ref demande --ref <mod de traduction|ID Workshop|dossier>"); return 2; }
+            try { return CompareRef.Run(compareRef, refArg, outRoot, lang, placeholder, env); }
+            catch (Exception e) { Console.Error.WriteLine(e.Message); return 2; }
         }
         if (calibrate != null) target = calibrate;
         if (target == null) { Console.WriteLine(Usage); return 1; }

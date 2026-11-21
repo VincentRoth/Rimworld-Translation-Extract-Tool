@@ -8,3 +8,6 @@ obj/
 # Extraction output (regenerable, ~360 MB). Finished translations live in the
 # Dibolic_FrenchModsPack repository (see Sync-Translations.ps1).
 out/
+
+# Translation worksheets (--export-todo): working files, imported into out/
+feuilles/

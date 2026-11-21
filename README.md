@@ -95,3 +95,22 @@ extract.cmd --fill-labels ks.flooringfloors,lucius.floorpatch --relabel   (after
 - `--fill-labels` writes `fr` of the pattern with `{M}` replaced by `fr` of the material, for `TODO` labels whose pattern **and** material are translated. Write the pattern so that no agreement is needed ("carrelage en croisillon de {M}" → "carrelage en croisillon de saphir"). `de` + vowel becomes `d'` ("d'émeraude"); column `elision` forces it (`oui`, e.g. h muet: "d'hématite") or prevents it (`non`). `--relabel` also regenerates labels still carrying the generator's review comment.
 - The report lists the untranslated patterns and materials that block the most labels.
 - Then check with `--check`. `TerrainDef.label` has a soft limit (like `ThingDef.label`): the French "… de <material>" form is usually longer than the English, so overruns show as `LONG (souple)`, not as errors.
+
+### Translation worksheets: `--export-todo`, `--import`
+```
+extract.cmd --export-todo adamas.vendingmachines,zal.titlesforme [--to <file>] [--batch 300]
+   (fill the text after the last "||" on each line)
+extract.cmd --import feuilles\todo_adamas.vendingmachines+1_20261121-233000.txt
+```
+- `--export-todo` writes every entry still at `TODO` (`all` = every mod under `out\`) to a plain text file, by default `feuilles\todo_<id>_<date>.txt` (never overwrites an existing sheet; `--batch N` splits it into files of N entries). Each entry is one line `packageId || file under Languages\French || key || ` with, above it, the English text and its context (context, length limit, placeholders to keep, official French, "texte anglais modifié").
+- A list entry has the key `key[]`; its items, in English and in French, are separated by ` ¶ `. The number of items may change for rule lists (`rulesStrings`).
+- The translation is plain text: `<color=…>`, `&` and `\n` are written as such, `--import` escapes them for XML. Empty lines are skipped (translate in several passes).
+- `--import` only replaces entries **still at `TODO`** (an entry translated since the export is reported, not overwritten), checks that each file still loads as XML before writing it, and lists the mods touched. Then: `Fix-Typography.ps1 -Path out\<mod>`, `--check`, and the pack sync of those mods.
+
+### Comparison with a third-party translation: `--compare-ref`
+```
+extract.cmd --compare-ref bodlosh.weaponstats --ref 2798150558
+```
+- `--ref`: the translation mod (packageId, Workshop ID, name) or a folder. Every `Languages\French*` folder of it is read (the game version's folder wins when a key is in several). Read-only; writes `out\<id>\compare-ref.csv` (`etat;type;cle;anglais;nous;reference`).
+- Keys translated on both sides: identical or different, typography left out (quotes, spaces before punctuation, case). **Short labels translated differently** (English up to 40 characters) are printed: that is where missed contexts show (Nov. 2026: *sway* read as recoil, *belt* not translated as the official « utilitaire »).
+- Keys only in the reference, looked up in the target mod (it must be installed): present in the current version's Defs/Patches/English (`extraction ?`: a text our extraction may have missed, to check), only in other files of the mod (`ancienne version`), or nowhere (`absente du mod`: another mod covered by the same translation pack, or a removed key).
