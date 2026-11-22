@@ -314,7 +314,8 @@ public static class Checker
                     if (val.Contains("TODO")) { todo++; Console.WriteLine($"TODO       {rel}: {e.Name.LocalName}"); }
                     else
                     {
-                        if (max != null && val.Length > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({val.Length}>{max}) {val}"); } }
+                        var shown = DisplayLength(val);
+                        if (max != null && shown > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {e.Name.LocalName} ({shown}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({shown}>{max}) {val}"); } }
                         if (en != null)
                             foreach (var ph in ContextResolver.FindPlaceholders(en))
                                 if (ph.StartsWith("{") && !val.Contains(ph) && !PronounReplaced(ph, val)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {e.Name.LocalName} manque {ph}"); }
@@ -341,6 +342,12 @@ public static class Checker
         var m = Regex.Match(ph, @"^\{(\w+?)_(pronoun|objective|possessive|objectivePronoun|possessivePronoun|reflexive)\}$");
         if (!m.Success) return false;
         if (m.Groups[2].Value.StartsWith("possessive")) return true;
-        return val.Contains("{" + m.Groups[1].Value + "_gender");
+        // replaced by the gender form, or by the name itself to avoid an agreement ({LOVER_nameDef})
+        var p = m.Groups[1].Value;
+        return val.Contains("{" + p + "_gender") || val.Contains("{" + p + "_nameDef}") || val.Contains("{" + p + "_nameFull}") || val.Contains("{" + p + "_labelShort}");
     }
+
+    /// <summary>Length as displayed: a gender form {X_gender ? a : b : c} counts as its longest variant.</summary>
+    static int DisplayLength(string val) =>
+        Regex.Replace(val, @"\{\w+_gender\s*\?([^}]*)\}", m => m.Groups[1].Value.Split(':').Select(s => s.Trim()).OrderByDescending(s => s.Length).First()).Length;
 }

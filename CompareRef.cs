@@ -36,6 +36,7 @@ public static class CompareRef
 
         // target mod (if installed): current-version texts and every file, to classify reference-only keys
         string? current = null, everything = null;
+        Dictionary<string, List<XmlElement>>? defs = null; HashSet<string>? englishKeys = null;
         try
         {
             var mod = env.ResolveTarget(id);
@@ -43,6 +44,7 @@ public static class CompareRef
             try { env.ComputeFolders(mod, new HashSet<string>()); } finally { GameEnv.AssumeAll = saved; }
             current = ReadAll(mod.Folders.SelectMany(f => new[] { "Defs", "Patches", Path.Combine("Languages", "English") }.Select(s => Path.Combine(f, s))));
             everything = ReadAll(new[] { mod.Root });
+            (defs, englishKeys) = IndexCurrent(mod.Folders);
         }
         catch (Exception e) { Console.WriteLine("Mod cible introuvable, clés de la référence non classées : " + e.Message); }
 
@@ -68,7 +70,12 @@ public static class CompareRef
             {
                 var name = t.Type == "Keyed" ? t.Key : t.Key.Split('.')[0];
                 var probe = t.Type == "Keyed" ? "<" + name + ">" : ">" + name + "<";
-                if (Has(current, probe, name)) { state = "référence seule : texte du mod actuel (extraction ?)"; refOnlyCurrent++; }
+                // field of a DefInjected key: last non-numeric segment (stages.0.label -> label); it must exist in that
+                // def (or its parents), or the exact key in the mod's English DefInjected
+                var field = t.Type == "Keyed" ? null : t.Key.Split('.').Skip(1).Reverse().FirstOrDefault(s => !s.All(char.IsDigit));
+                bool fieldKnown = field == null || englishKeys!.Contains(t.Key) || DefHasField(defs!, name, field);
+                if (Has(current, probe, name) && fieldKnown) { state = "référence seule : texte du mod actuel (extraction ?)"; refOnlyCurrent++; }
+                else if (Has(current, probe, name)) { state = "référence seule : champ absent du mod actuel (ancienne clé)"; refOnlyOld++; }
                 else if (Has(everything!, probe, name)) { state = "référence seule : ancienne version du mod"; refOnlyOld++; }
                 else { state = "référence seule : absente du mod"; refOther++; }   // another mod of the same translation pack, or a removed key
             }
@@ -144,6 +151,57 @@ public static class CompareRef
             foreach (var f in Directory.EnumerateFiles(d, "*.xml", SearchOption.AllDirectories))
                 try { sb.Append(File.ReadAllText(f)).Append('\n'); } catch { }
         return sb.ToString();
+    }
+
+    /// <summary>Defs of the current version by defName and by Name (abstract parents), and the keys of its English DefInjected.</summary>
+    static (Dictionary<string, List<XmlElement>>, HashSet<string>) IndexCurrent(IEnumerable<string> folders)
+    {
+        var defs = new Dictionary<string, List<XmlElement>>();
+        var keys = new HashSet<string>();
+        void Add(string k, XmlElement e) { if (!defs.TryGetValue(k, out var l)) defs[k] = l = new(); l.Add(e); }
+        foreach (var f in folders.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var sub in new[] { "Defs", "Patches" })
+            {
+                var d = Path.Combine(f, sub);
+                if (!Directory.Exists(d)) continue;
+                foreach (var file in Directory.EnumerateFiles(d, "*.xml", SearchOption.AllDirectories))
+                {
+                    var x = new XmlDocument();
+                    try { x.Load(file); } catch { continue; }
+                    foreach (XmlElement e in x.SelectNodes("//*[defName]")!) Add(e["defName"]!.InnerText.Trim(), e);
+                    foreach (XmlElement e in x.SelectNodes("//*[@Name]")!) Add("@" + e.GetAttribute("Name"), e);
+                }
+            }
+            var lang = Path.Combine(f, "Languages");
+            if (!Directory.Exists(lang)) continue;
+            foreach (var en in Directory.GetDirectories(lang).Where(d => Path.GetFileName(d).StartsWith("English", StringComparison.OrdinalIgnoreCase)))
+                foreach (var file in Directory.EnumerateFiles(en, "*.xml", SearchOption.AllDirectories))
+                {
+                    var x = new XmlDocument();
+                    try { x.Load(file); } catch { continue; }
+                    if (x.DocumentElement != null) foreach (var e in x.DocumentElement.ChildNodes.OfType<XmlElement>()) keys.Add(e.Name);
+                }
+        }
+        return (defs, keys);
+    }
+
+    static bool DefHasField(Dictionary<string, List<XmlElement>> defs, string defName, string field)
+    {
+        var seen = new HashSet<string>();
+        var todo = new Queue<string>(); todo.Enqueue(defName);
+        while (todo.Count > 0)
+        {
+            var k = todo.Dequeue();
+            if (!seen.Add(k) || !defs.TryGetValue(k, out var list)) continue;
+            foreach (var e in list)
+            {
+                if (e.GetElementsByTagName(field).Count > 0) return true;
+                var parent = e.GetAttribute("ParentName");
+                if (parent != "") todo.Enqueue("@" + parent);
+            }
+        }
+        return false;
     }
 
     static bool Has(string text, string probe, string name) =>

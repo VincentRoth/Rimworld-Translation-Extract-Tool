@@ -192,15 +192,17 @@ public sealed class Extraction
         return false;
     }
 
-    static readonly Regex TextyName = new(@"^(label|description|desc|text|title|gerund|verb|message|tooltip|tip|noun|adjective|letter|header)|(Label|Description|Desc|Text|Title|Gerund|Verb|Message|Tooltip|Tip|Noun|Adjective|Letter|Header|Msg)$", RegexOptions.Compiled);
+    static readonly Regex TextyName = new(@"^(label|description|desc|text|title|gerund|verb|message|tooltip|tip|noun|adjective|letter|header)|(Label|Description|Desc|Text|Title|Gerund|Verb|Message|Tooltip|Tip|Noun|Adjective|Letter|Header|Msg)(_[A-Za-z0-9]+)?$", RegexOptions.Compiled);
     static bool LooksLikeText(string v, string field = "")
     {
         v = v.Trim();
         if (v.Length == 0 || !v.Any(char.IsLetter)) return false;
         if (v.Count(c => c == '*' || c == '|') >= 6) return false;   // données sérialisées (ex. préréglage de colon), pas du texte
         if (v.EndsWith(".png") || v.EndsWith(".dll")) return false;
-        // un chemin (Things/Item/X) n'a pas d'espace ; "price / kg" dans un champ nommé comme un texte en est un
-        if ((v.Contains('/') || v.Contains('\\')) && !(field != "" && TextyName.IsMatch(field) && v.Contains(' '))) return false;
+        // un chemin (Things/Item/X) n'a pas d'espace ; "price / kg" dans un champ nommé comme un texte en est un.
+        // Les sauts de ligne écrits "\n" ne sont pas des séparateurs de chemin (Research Reinvented : shortDesc_Direct).
+        var vp = v.Replace("\\n", " ");
+        if ((vp.Contains('/') || vp.Contains('\\')) && !(field != "" && TextyName.IsMatch(field) && v.Contains(' '))) return false;
         if (Regex.IsMatch(v, @"^[\w\-\.]+$"))                      // un seul mot
             return field != "" && TextyName.IsMatch(field) && !v.Contains('_') && !v.Contains('.');
         return v.Contains(' ') || v.Contains('{') || v.Contains('[');
