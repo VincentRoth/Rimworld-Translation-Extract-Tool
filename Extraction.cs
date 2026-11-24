@@ -240,6 +240,8 @@ public sealed class Extraction
     {
         if (f.NoTranslate) return false;
         if (string.IsNullOrWhiteSpace(value)) return false;
+        // XML Extensions setting ("{Key.SubKey}"): replaced by the text the player typed, a translation would overwrite it
+        if (Regex.IsMatch(value.Trim(), @"^\{[A-Za-z]\w*(\.\w+)+\}$")) return false;
         if (f.MustTranslate) return true;
         if (f.Field.Name.StartsWith("debug")) return false;
         if (IncludeUnmarked && LooksLikeText(value, f.Field.Name)) return true;

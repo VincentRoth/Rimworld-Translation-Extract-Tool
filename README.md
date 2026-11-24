@@ -141,6 +141,8 @@ extract.cmd --compare-ref bodlosh.weaponstats --ref 2798150558
 - Clés traduites des deux côtés : identiques ou différentes, typographie mise à part (guillemets, espaces avant la ponctuation, casse). **Les libellés courts traduits autrement** (anglais de 40 caractères au plus) sont affichés : c'est là que se voient les contextes manqués (novembre 2026 : *sway* lu comme un recul, *belt* non traduit par l'officiel « utilitaire »).
 - Clés présentes seulement dans la référence, cherchées dans le mod cible (qui doit être installé) : la def existe dans la version actuelle et a ce champ (son XML ou ses parents abstraits), ou la clé exacte est dans son English DefInjected (`extraction ?` : texte que notre extraction a pu manquer, à vérifier) ; la def existe sans ce champ (`champ absent du mod actuel` : ancienne clé) ; seulement dans d'autres fichiers du mod (`ancienne version`), ou nulle part (`absente du mod` : autre mod couvert par le même pack de traduction, ou clé retirée).
 
+- Valeur `{Clé.SousClé}` entière (réglage XML Extensions, ex. Some More Jobs) : non extraite, c'est le texte saisi par le joueur (24/11/2026).
+
 ## Limites connues
 
 - Patchs `PatchOperation` en C# (classe personnalisée) qui n'enveloppent pas d'autres opérations : non exécutés, listés dans le rapport (`MakeGunCECompatible`, `AddOrMerge`, `SliderFloat`…).
