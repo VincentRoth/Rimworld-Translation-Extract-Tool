@@ -96,6 +96,15 @@ extract.cmd --fill-tm lucius.floorpatch --tm-global (puis tous les mods de out\)
 `extract.cmd --fill-tm all` fait de même pour tous les mods de `out\` en une passe (une seule mémoire, construite sur tous avant de remplir).
 Pour chaque `TODO`, recopie la traduction d'une autre entrée au même texte `EN:` exact : d'abord dans le même mod, puis (avec `--tm-global`) dans tout `out\`. Les entrées `ATTENTION` (anglais modifié depuis la traduction) ne servent pas de source. Si le même anglais a plusieurs traductions, la plus fréquente est prise et le cas est listé (« à harmoniser »). Le rapport donne le nombre d'entrées remplies et ce qui reste : `TODO` restants, textes anglais **distincts**, les plus répétés. Façon de faire : traduire une occurrence de chaque texte, puis relancer `--fill-tm`. Les listes (`<li>`) sont remplies aussi quand toute la liste anglaise est identique (24/11/2026).
 
+**Contexte** (24/11/2026) : une traduction n'est reprise que du même type de def et du même endroit de la def (`label`, `tools/label`…) ; à défaut, du même champ d'un autre type dans le même mod ; sinon seulement si l'anglais a au moins 5 mots. Si les traductions connues divergent, la plus fréquente doit couvrir deux tiers des cas. Les couples (type, anglais) de `Dibolic_FrenchModsPackRemplissage_exclusions.csv` (`source` = `memoire`) ne sont jamais repris.
+
+### Traduction officielle : `--fill-official`
+```
+extract.cmd --fill-official all --dry-run --to rapport.csv   (essai : rien n'est écrit)
+extract.cmd --fill-official sarg.alphaanimals
+```
+Remplit les `TODO` avec `Officiel.csv` du pack, pour le même anglais exact, le même type de def et le même endroit (même clé pour les Keyed). Laissés à `TODO` : plusieurs traductions officielles, terme du glossaire différent, `Remplissage_exclusions.csv` (`source` = `officiel`). Commentaire ajouté : `Auto (officiel) : à relire`. À lancer avant `--fill-tm`.
+
 ### Libellés « matériau × motif » : `--label-tables`, `--fill-labels`
 Pour Flooring Floors et ses mods de patchs, dont les libellés combinent un matériau et un motif (« sapphire crosshatch M tile », « V cocoawood strip floor »).
 ```

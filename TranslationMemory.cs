@@ -163,7 +163,7 @@ public static class TranslationMemory
         var targetPaths = files.Select(f => System.IO.Path.GetFullPath(f.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var local = BuildMemory(files);
-        Dictionary<string, Candidate>? other = null;
+        Dictionary<string, List<Entry>>? other = null;
         if (global)
         {
             var others = Directory.EnumerateDirectories(outRoot)
@@ -173,7 +173,7 @@ public static class TranslationMemory
             other = BuildMemory(others);
         }
 
-        int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0;
+        int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0, skipped = 0;
         var conflictList = new List<string>();
         foreach (var f in files)
         {
@@ -181,11 +181,12 @@ public static class TranslationMemory
             {
                 todo++;
                 if (it.En == null) continue;
-                Candidate? c = null; string scope = "";
-                if (local.TryGetValue(it.En, out var lc)) { c = lc; scope = "même mod"; fromLocal++; }
-                else if (other != null && other.TryGetValue(it.En, out var oc)) { c = oc; scope = "autre mod : " + oc.Source; fromOther++; }
+                string scope = "même mod";
+                var c = Find(local, f, it, true, ref skipped);
+                if (c != null) fromLocal++;
+                else if (other != null && (c = Find(other, f, it, false, ref skipped)) != null) { scope = "autre mod : " + c.Source; fromOther++; }
                 if (c == null) continue;
-                if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
+                if (c.Variants > 1) { conflicts++; if (conflictList.Count < 60) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
                 f.Set(it, c.Value, $"Auto (mémoire de traduction, {scope}) : à relire");
             }
             f.Save();
@@ -202,6 +203,7 @@ public static class TranslationMemory
                               " : traduire une occurrence de chacun puis relancer --fill-tm remplit les autres.");
             foreach (var g in groups.Take(10)) Console.WriteLine($"  {g.Count(),5} x  {LangFile.ShowEn(g.Key, 90)}");
         }
+        if (skipped > 0) Console.WriteLine($"{skipped} recherches sans suite : même anglais connu ailleurs (autre type ou champ, texte court) ou traductions divergentes.");
         if (conflicts > 0)
         {
             Console.WriteLine($"{conflicts} entrées remplies alors que le même anglais a plusieurs traductions (à harmoniser) :");
@@ -224,7 +226,7 @@ public static class TranslationMemory
             .ToList();
         var global = BuildMemory(byMod.SelectMany(m => m.files).ToList());
 
-        int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0, mods = 0;
+        int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0, skipped = 0, mods = 0;
         var conflictList = new List<string>();
         foreach (var (mod, files) in byMod)
         {
@@ -236,11 +238,12 @@ public static class TranslationMemory
                 {
                     todo++;
                     if (it.En == null) continue;
-                    Candidate? c = null; string scope = "";
-                    if (local.TryGetValue(it.En, out var lc)) { c = lc; scope = "même mod"; fromLocal++; }
-                    else if (global.TryGetValue(it.En, out var oc)) { c = oc; scope = "autre mod : " + oc.Source; fromOther++; }
+                    string scope = "même mod";
+                    var c = Find(local, f, it, true, ref skipped);
+                    if (c != null) fromLocal++;
+                    else if ((c = Find(global, f, it, false, ref skipped)) != null) { scope = "autre mod : " + c.Source; fromOther++; }
                     if (c == null) continue;
-                    if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
+                    if (c.Variants > 1) { conflicts++; if (conflictList.Count < 60) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
                     f.Set(it, c.Value, $"Auto (mémoire de traduction, {scope}) : à relire");
                 }
                 f.Save();
@@ -254,6 +257,7 @@ public static class TranslationMemory
         var groups = left.Where(i => i.En != null).GroupBy(i => i.En!).OrderByDescending(g => g.Count()).ToList();
         Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts.");
         foreach (var g in groups.Take(15)) Console.WriteLine($"  {g.Count(),5} x  {LangFile.ShowEn(g.Key, 90)}");
+        if (skipped > 0) Console.WriteLine($"{skipped} recherches sans suite : même anglais connu ailleurs (autre type ou champ, texte court) ou traductions divergentes.");
         if (conflicts > 0)
         {
             Console.WriteLine($"{conflicts} entrées remplies alors que le même anglais a plusieurs traductions (à harmoniser) :");
@@ -262,23 +266,53 @@ public static class TranslationMemory
         return 0;
     }
 
-    sealed class Candidate { public string Value = ""; public int Variants; public string Source = ""; }
-
-    static Dictionary<string, Candidate> BuildMemory(List<LangFile> files)
+    // where a text sits: def type + place in the def ("label", "tools/label"); Keyed texts are one context
+    internal static (string type, string shape) Context(string path, string key)
     {
-        var counts = new Dictionary<string, Dictionary<string, (int n, string src)>>();
+        var parts = Path.GetFullPath(path).Split(Path.DirectorySeparatorChar);
+        int di = Array.LastIndexOf(parts, "DefInjected");
+        return di >= 0 && di + 1 < parts.Length ? (parts[di + 1], OfficialFill.Shape(key)) : ("Keyed", "");
+    }
+
+    sealed class Candidate { public string Value = ""; public int Variants; public string Source = ""; }
+    sealed class Entry { public string Type = "", Shape = "", Value = "", Source = ""; public int N; }
+
+    static Dictionary<string, List<Entry>> BuildMemory(List<LangFile> files)
+    {
+        var mem = new Dictionary<string, List<Entry>>();
         foreach (var f in files)
             foreach (var it in f.Items.Concat(f.Lists))
             {
                 if (it.IsTodo || it.En == null || it.EnChanged || it.Value.Trim() == "" || it.Value.Contains("TODO")) continue;
-                if (!counts.TryGetValue(it.En, out var d)) counts[it.En] = d = new();
-                d[it.Value] = d.TryGetValue(it.Value, out var x) ? (x.n + 1, x.src) : (1, ModName(f.Path));
+                var (type, shape) = Context(f.Path, it.Key);
+                if (!mem.TryGetValue(it.En, out var l)) mem[it.En] = l = new();
+                var e = l.FirstOrDefault(x => x.Type == type && x.Shape == shape && x.Value == it.Value);
+                if (e == null) l.Add(new Entry { Type = type, Shape = shape, Value = it.Value, Source = ModName(f.Path), N = 1 });
+                else e.N++;
             }
-        return counts.ToDictionary(kv => kv.Key, kv =>
-        {
-            var best = kv.Value.OrderByDescending(v => v.Value.n).First();
-            return new Candidate { Value = best.Key, Variants = kv.Value.Count, Source = best.Value.src };
-        });
+        return mem;
+    }
+
+    static HashSet<(string, string)>? excluded;
+    const int LongText = 5; // words: from there on a text means the same thing wherever it sits
+
+    /// <summary>
+    /// Translation of the same English text: same def type and field first; a text of another place only when it is
+    /// long enough, or in the same mod for the same field name. Nothing when the known translations disagree
+    /// (the most frequent one must cover two thirds).
+    /// </summary>
+    static Candidate? Find(Dictionary<string, List<Entry>> mem, LangFile f, LangFile.Item it, bool sameMod, ref int skipped)
+    {
+        if (!mem.TryGetValue(it.En!, out var all)) return null;
+        var (type, shape) = Context(f.Path, it.Key);
+        if ((excluded ??= OfficialFill.Exclusions(Program.PackDir, "memoire")).Contains((type, it.En!))) { skipped++; return null; }
+        var l = all.Where(e => e.Type == type && e.Shape == shape).ToList();
+        if (l.Count == 0 && sameMod && type != "Keyed") l = all.Where(e => e.Type != "Keyed" && e.Shape == shape).ToList();
+        if (l.Count == 0 && LangFile.ShowEn(it.En!, 100000).Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= LongText) l = all;
+        if (l.Count == 0) { skipped++; return null; }
+        var g = l.GroupBy(e => e.Value).Select(x => (v: x.Key, n: x.Sum(e => e.N), src: x.First().Source)).OrderByDescending(x => x.n).ToList();
+        if (g[0].n * 3 < g.Sum(x => x.n) * 2) { skipped++; return null; }
+        return new Candidate { Value = g[0].v, Variants = g.Count, Source = g[0].src };
     }
 
     static string ModName(string path)

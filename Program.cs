@@ -18,6 +18,8 @@ Usage :
   TranslationExtractor --label-tables <id[,id2]> [--tables <dossier>]
                        décompose les libellés « matériau x motif » (Flooring Floors) et écrit/met à jour
                        label-patterns.csv et label-materials.csv (défaut : out\<premier id>)
+  TranslationExtractor --fill-official <dossier|packageId|all> [--dry-run] [--to <rapport.csv>]
+                       remplit les TODO avec la traduction officielle (Officiel.csv) du même anglais, même type de def et même champ
   TranslationExtractor --fill-labels <id[,id2]> [--tables <dossier>]
                        remplit les .label TODO à partir des deux tables traduites
                        (--relabel : régénère aussi les libellés déjà générés, après correction des tables)
@@ -59,6 +61,9 @@ Options :
         return @"D:\Jeux\Rimworld\TranslationExtractTool";
     }
 
+    /// <summary>The translation pack (Officiel.csv, Glossaire.csv, Remplissage_exclusions.csv), next to the tool.</summary>
+    public static string PackDir => Path.Combine(ToolDir(), "..", "Dibolic_FrenchModsPack");
+
     static int Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -66,6 +71,7 @@ Options :
                 gameDir = null, workDir = null, version = null, checkPath = null, calibrate = null, listFilter = null, probe = null;
         bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false, noImplicit = false; string? dumpDef = null;
         string? fillTm = null, labelTables = null, fillLabels = null, tablesDir = null; string labelFolder = "TerrainDef"; bool tmGlobal = false, relabel = false; int minShare = 3;
+        string? fillOfficial = null; bool dryRun = false;
         string? exportTodo = null, importSheet = null, sheetFile = null, compareRef = null, refArg = null; int batch = 0;
         for (int i = 0; i < args.Length; i++)
         {
@@ -91,6 +97,8 @@ Options :
                 case "--probe": probe = Next(); break;
                 case "--calibrate": calibrate = Next(); break;
                 case "--fill-tm": fillTm = Next(); break;
+                case "--fill-official": fillOfficial = Next(); break;
+                case "--dry-run": dryRun = true; break;
                 case "--tm-global": tmGlobal = true; break;
                 case "--label-tables": labelTables = Next(); break;
                 case "--fill-labels": fillLabels = Next(); break;
@@ -117,12 +125,13 @@ Options :
         try
         {
             if (fillTm != null) return TranslationMemory.Run(fillTm, outRoot, lang, placeholder, tmGlobal);
+            if (fillOfficial != null) return OfficialFill.Run(fillOfficial, outRoot, lang, placeholder, PackDir, sheetFile, dryRun);
             if (labelTables != null) return LabelGen.Tables(Ids(labelTables), outRoot, lang, placeholder, tablesDir, labelFolder, minShare);
             if (fillLabels != null) return LabelGen.Fill(Ids(fillLabels), outRoot, lang, placeholder, tablesDir, labelFolder, minShare, relabel);
             if (exportTodo != null) return Worksheet.Export(Ids(exportTodo), outRoot, lang, placeholder, sheetFile, batch, ToolDir());
             if (importSheet != null) return Worksheet.Import(importSheet, outRoot, lang, placeholder);
         }
-        catch (Exception e) when (fillTm != null || labelTables != null || fillLabels != null || exportTodo != null || importSheet != null) { Console.Error.WriteLine(e.Message); return 2; }
+        catch (Exception e) when (fillTm != null || fillOfficial != null || labelTables != null || fillLabels != null || exportTodo != null || importSheet != null) { Console.Error.WriteLine(e.Message); return 2; }
         if (probe != null)
         {
             var pe = new GameEnv(); pe.Scan(); var rr = new Report();
