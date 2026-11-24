@@ -90,6 +90,7 @@ foreach ($f in $files) {
     $n = 0
     foreach ($t in $doc.SelectNodes('//text()')) {
         if ($t.ParentNode.NodeType -ne 'Element' -or -not $t.Value.Trim()) { continue }
+        if ($t.ParentNode.Name -eq 'path' -and $t.ParentNode.ParentNode.Name -eq 'rep') { continue }   # key, not text
         $new = Fix-Value $t.Value
         if ($f.FullName -match '\\JobDef\\' -and $t.ParentNode.Name -like '*.reportString' -and $new.Length -ge 2 -and
             [char]::IsUpper($new[0]) -and -not [char]::IsUpper($new[1]) -and $new -ne 'TODO') {

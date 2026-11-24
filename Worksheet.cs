@@ -18,7 +18,9 @@ public static class Worksheet
     // comment block + entry whose value is the placeholder, or a list made only of placeholder items
     static Regex EntryRx(string ph) => new(
         @"(?s)((?:[ \t]*<!--(?:(?!-->).)*-->[ \t]*\r?\n)*)([ \t]*)<([^\s<>/!?]+)>(" + Regex.Escape(ph) +
-        @"|\s*(?:<li>" + Regex.Escape(ph) + @"</li>\s*)+)</\3>");
+        @"|\s*(?:<li>" + Regex.Escape(ph) + @"</li>\s*)+)</\3>" +
+        // key that is not a valid element name (LangXml)
+        @"|(?s)((?:[ \t]*<!--(?:(?!-->).)*-->[ \t]*\r?\n)*)[ \t]*<rep><path>([^<]*)</path><trans>" + Regex.Escape(ph) + "</trans></rep>");
 
     static readonly Regex Li = new(@"<li>(.*?)</li>", RegexOptions.Singleline);
 
@@ -34,7 +36,8 @@ public static class Worksheet
             var rel = Path.GetRelativePath(langDir, f);
             foreach (Match m in rx.Matches(t))
             {
-                var c = m.Groups[1].Value;
+                bool rep = m.Groups[6].Success;
+                var c = m.Groups[rep ? 5 : 1].Value;
                 bool list = m.Groups[4].Value.Contains("<li>");
                 var en = Regex.Match(c, @"<!-- EN:(.*?)-->", RegexOptions.Singleline).Groups[1].Value;
                 if (list) en = string.Join(ItemSep, Li.Matches(en).Select(x => x.Groups[1].Value.Trim()));
@@ -49,7 +52,7 @@ public static class Worksheet
                 var off = Regex.Match(c, @"<!-- FR du jeu de base : (.*?) -->").Groups[1].Value;
                 if (off != "") info.Add("officiel : " + off);
                 if (c.Contains("<!-- ATTENTION")) info.Add("texte anglais modifié");
-                res.Add(new Todo { Rel = rel, Key = m.Groups[3].Value, En = en, Info = string.Join(" | ", info), List = list, Items = list ? Li.Matches(m.Groups[4].Value).Count : 0 });
+                res.Add(new Todo { Rel = rel, Key = rep ? System.Net.WebUtility.HtmlDecode(m.Groups[6].Value) : m.Groups[3].Value, En = en, Info = string.Join(" | ", info), List = list, Items = list ? Li.Matches(m.Groups[4].Value).Count : 0 });
             }
         }
         return res;
@@ -131,7 +134,7 @@ public static class Worksheet
             {
                 bool list = l.key.EndsWith("[]");
                 var key = list ? l.key[..^2] : l.key;
-                var rx = new Regex(@"(<" + Regex.Escape(key) + @">)(" + Regex.Escape(ph) + @"|(\s*<li>" + Regex.Escape(ph) + @"</li>)+(\s*))(</" + Regex.Escape(key) + ">)");
+                var rx = new Regex("(" + Regex.Escape(LangXml.Open(key)) + ")(" + Regex.Escape(ph) + @"|(\s*<li>" + Regex.Escape(ph) + @"</li>)+(\s*))(" + Regex.Escape(LangXml.Close(key)) + ")");
                 var m = rx.Match(text);
                 if (!m.Success) { Console.WriteLine($"  ligne {l.n} : {key} n'est plus à TODO ou absent ({g.Key.rel})"); notFound++; continue; }
                 string inner;

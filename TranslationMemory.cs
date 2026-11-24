@@ -19,12 +19,22 @@ public sealed class LangFile
         public bool AutoLabel;      // written by --fill-labels (review comment still present)
         public int NoteLine = -1;   // line of an "Auto" review comment, if any
         public bool IsTodo;
+        public bool Rep;            // <rep><path>…</path><trans>…</trans></rep> (LangXml)
+        public int EndLine = -1;    // list entry: last line of the element
     }
+
+    static readonly Regex RepRx = new(@"^(\s*)<rep><path>(.*?)</path><trans>(.*)</trans></rep>\s*$");
+    static readonly Regex ListOpen = new(@"^(\s*)<([^\s<>/!?]+)>\s*$");
+    static readonly Regex LiLine = new(@"<li>(.*?)</li>", RegexOptions.Singleline);
+    const string ListEn = "\u0001list\u0001";
+    static string LiText(string s) => ListEn + string.Join("\u0001", LiLine.Matches(s).Select(m => m.Groups[1].Value.Trim()));
 
     static readonly Regex EntryRx = new(@"^(\s*)<([^\s<>/!?]+)>(.*)</\2>\s*$");
     public string Path = "";
     public List<string> Lines = new();
     public List<Item> Items = new();
+    /// <summary>List entries (several lines, &lt;li&gt;): Value = inner XML, En = items of the EN comment.</summary>
+    public List<Item> Lists = new();
     public bool Dirty;
 
     public static LangFile Load(string path, string placeholder)
@@ -39,23 +49,52 @@ public sealed class LangFile
             {
                 if (t.StartsWith("<!-- EN:"))
                 {
-                    // single-line EN comment only; list entries span several lines and are skipped
-                    en = t.EndsWith("-->") ? t[8..^3].Trim() : null;
                     changed = false; autoLabel = false; noteLine = -1;
+                    if (t.EndsWith("-->")) en = t[8..^3].Trim();
+                    else
+                    {
+                        // list entry: the EN comment holds one <li> per line
+                        int j = i; while (j < f.Lines.Count && !f.Lines[j].Contains("-->")) j++;
+                        var block = string.Join("\n", f.Lines.Skip(i).Take(j - i + 1));
+                        en = block.Contains("<li>") ? LiText(block) : null;
+                        i = j;
+                    }
                 }
                 else if (t.StartsWith("<!-- ATTENTION")) changed = true;
                 else if (t.StartsWith("<!-- Auto ")) { noteLine = i; autoLabel = t.StartsWith(LabelNotePrefix); }
                 continue;
             }
-            var m = EntryRx.Match(f.Lines[i]);
-            if (m.Success && m.Groups[2].Value != "li")
+            var rm = RepRx.Match(f.Lines[i]);
+            var m = rm.Success ? rm : EntryRx.Match(f.Lines[i]);
+            var lo = ListOpen.Match(f.Lines[i]);
+            if (lo.Success && lo.Groups[2].Value != "LanguageData")
+            {
+                int j = i + 1; while (j < f.Lines.Count && f.Lines[j].Trim() != $"</{lo.Groups[2].Value}>") j++;
+                if (j < f.Lines.Count)
+                {
+                    var inner = string.Join("\n", f.Lines.Skip(i + 1).Take(j - i - 1));
+                    var vals = LiLine.Matches(inner).Select(x => x.Groups[1].Value.Trim()).ToList();
+                    if (vals.Count > 0)
+                        f.Lists.Add(new Item { Line = i, EndLine = j, Key = lo.Groups[2].Value, Value = inner, En = en != null && en.StartsWith(ListEn) ? en : null,
+                            EnChanged = changed, NoteLine = noteLine, IsTodo = vals.All(x => x == placeholder) });
+                    i = j;
+                }
+            }
+            else if (m.Success && m.Groups[2].Value != "li")
             {
                 var v = m.Groups[3].Value;
-                f.Items.Add(new Item { Line = i, Key = m.Groups[2].Value, Value = v, En = en, EnChanged = changed, IsTodo = v.Trim() == placeholder, AutoLabel = autoLabel, NoteLine = noteLine });
+                f.Items.Add(new Item { Line = i, Rep = rm.Success, Key = m.Groups[2].Value, Value = v, En = en != null && en.StartsWith(ListEn) ? null : en, EnChanged = changed, IsTodo = v.Trim() == placeholder, AutoLabel = autoLabel, NoteLine = noteLine });
             }
             if (t.Length > 0 && !t.StartsWith("<!--")) { en = null; changed = false; autoLabel = false; noteLine = -1; }
         }
         return f;
+    }
+
+    /// <summary>English text for display (a list shows its items).</summary>
+    public static string ShowEn(string en, int max = 200)
+    {
+        if (en.StartsWith(ListEn)) en = en[ListEn.Length..].Replace("\u0001", " ¶ ");
+        return en.Length > max ? en[..max] + "…" : en;
     }
 
     public const string LabelNotePrefix = "<!-- Auto (libellé généré";
@@ -63,9 +102,14 @@ public sealed class LangFile
     /// <summary>Replace the value of an entry and put a short review comment above it (replacing a previous "Auto" comment).</summary>
     public void Set(Item it, string value, string? note)
     {
-        var m = EntryRx.Match(Lines[it.Line]);
-        var indent = m.Groups[1].Value;
-        Lines[it.Line] = $"{indent}<{it.Key}>{value}</{it.Key}>";
+        var indent = Regex.Match(Lines[it.Line], @"^\s*").Value;
+        if (it.EndLine > it.Line)
+        {
+            // list: the whole block goes on its first line, the following ones are dropped by Save (line indexes stay valid)
+            Lines[it.Line] = $"{indent}<{it.Key}>\n{value}\n{indent}</{it.Key}>";
+            for (int l = it.Line + 1; l <= it.EndLine; l++) Lines[l] = null!;
+        }
+        else Lines[it.Line] = it.Rep ? $"{indent}<rep><path>{it.Key}</path><trans>{value}</trans></rep>" : $"{indent}<{it.Key}>{value}</{it.Key}>";
         if (note != null)
         {
             var c = $"{indent}<!-- {San(note)} -->";
@@ -80,7 +124,7 @@ public sealed class LangFile
     public void Save()
     {
         if (!Dirty) return;
-        File.WriteAllText(Path, string.Join("\n", Lines), new UTF8Encoding(true));
+        File.WriteAllText(Path, string.Join("\n", Lines.Where(l => l != null)), new UTF8Encoding(true));
         Dirty = false;
     }
 
@@ -133,7 +177,7 @@ public static class TranslationMemory
         var conflictList = new List<string>();
         foreach (var f in files)
         {
-            foreach (var it in f.Items.Where(i => i.IsTodo).ToList())
+            foreach (var it in f.Items.Concat(f.Lists).Where(i => i.IsTodo).ToList())
             {
                 todo++;
                 if (it.En == null) continue;
@@ -141,7 +185,7 @@ public static class TranslationMemory
                 if (local.TryGetValue(it.En, out var lc)) { c = lc; scope = "même mod"; fromLocal++; }
                 else if (other != null && other.TryGetValue(it.En, out var oc)) { c = oc; scope = "autre mod : " + oc.Source; fromOther++; }
                 if (c == null) continue;
-                if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{it.En}  →  {c.Value}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
+                if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
                 f.Set(it, c.Value, $"Auto (mémoire de traduction, {scope}) : à relire");
             }
             f.Save();
@@ -150,13 +194,13 @@ public static class TranslationMemory
         Console.WriteLine($"Mémoire de traduction : {local.Count} textes anglais déjà traduits dans le mod" + (other != null ? $", {other.Count} dans les autres mods de out\\" : ""));
         Console.WriteLine($"Entrées TODO : {todo}  ->  remplies : {fromLocal + fromOther} (même mod : {fromLocal}" + (other != null ? $", autres mods : {fromOther}" : "") + $"), restantes : {todo - fromLocal - fromOther}");
         // what is left: how many distinct English texts must be typed to clear the remaining TODOs with this command
-        var left = files.SelectMany(f => f.Items).Where(i => i.IsTodo).ToList();
+        var left = files.SelectMany(f => f.Items.Concat(f.Lists)).Where(i => i.IsTodo).ToList();
         if (left.Count > 0)
         {
             var groups = left.Where(i => i.En != null).GroupBy(i => i.En!).OrderByDescending(g => g.Count()).ToList();
-            Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts" + (left.Count(i => i.En == null) is int nl && nl > 0 ? $" (+{nl} listes <li>)" : "") +
+            Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts" + (left.Count(i => i.En == null) is int nl && nl > 0 ? $" (+{nl} sans texte anglais)" : "") +
                               " : traduire une occurrence de chacun puis relancer --fill-tm remplit les autres.");
-            foreach (var g in groups.Take(10)) Console.WriteLine($"  {g.Count(),5} x  {(g.Key.Length > 90 ? g.Key[..90] + "…" : g.Key)}");
+            foreach (var g in groups.Take(10)) Console.WriteLine($"  {g.Count(),5} x  {LangFile.ShowEn(g.Key, 90)}");
         }
         if (conflicts > 0)
         {
@@ -188,7 +232,7 @@ public static class TranslationMemory
             int before = fromLocal + fromOther;
             foreach (var f in files)
             {
-                foreach (var it in f.Items.Where(i => i.IsTodo).ToList())
+                foreach (var it in f.Items.Concat(f.Lists).Where(i => i.IsTodo).ToList())
                 {
                     todo++;
                     if (it.En == null) continue;
@@ -196,7 +240,7 @@ public static class TranslationMemory
                     if (local.TryGetValue(it.En, out var lc)) { c = lc; scope = "même mod"; fromLocal++; }
                     else if (global.TryGetValue(it.En, out var oc)) { c = oc; scope = "autre mod : " + oc.Source; fromOther++; }
                     if (c == null) continue;
-                    if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{it.En}  →  {c.Value}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
+                    if (c.Variants > 1) { conflicts++; if (conflictList.Count < 30) conflictList.Add($"{LangFile.ShowEn(it.En)}  →  {c.Value.Trim()}  ({c.Variants} traductions différentes, la plus fréquente est prise)"); }
                     f.Set(it, c.Value, $"Auto (mémoire de traduction, {scope}) : à relire");
                 }
                 f.Save();
@@ -206,10 +250,10 @@ public static class TranslationMemory
 
         Console.WriteLine($"Mémoire de traduction (tout out\\) : {global.Count} textes anglais déjà traduits, {byMod.Count} mods");
         Console.WriteLine($"Entrées TODO : {todo}  ->  remplies : {fromLocal + fromOther} dans {mods} mods (même mod : {fromLocal}, autres mods : {fromOther}), restantes : {todo - fromLocal - fromOther}");
-        var left = byMod.SelectMany(m => m.files).SelectMany(f => f.Items).Where(i => i.IsTodo).ToList();
+        var left = byMod.SelectMany(m => m.files).SelectMany(f => f.Items.Concat(f.Lists)).Where(i => i.IsTodo).ToList();
         var groups = left.Where(i => i.En != null).GroupBy(i => i.En!).OrderByDescending(g => g.Count()).ToList();
-        Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts (+ listes <li> non gérées).");
-        foreach (var g in groups.Take(15)) Console.WriteLine($"  {g.Count(),5} x  {(g.Key.Length > 90 ? g.Key[..90] + "…" : g.Key)}");
+        Console.WriteLine($"Reste : {left.Count} TODO pour {groups.Count} textes anglais distincts.");
+        foreach (var g in groups.Take(15)) Console.WriteLine($"  {g.Count(),5} x  {LangFile.ShowEn(g.Key, 90)}");
         if (conflicts > 0)
         {
             Console.WriteLine($"{conflicts} entrées remplies alors que le même anglais a plusieurs traductions (à harmoniser) :");
@@ -224,7 +268,7 @@ public static class TranslationMemory
     {
         var counts = new Dictionary<string, Dictionary<string, (int n, string src)>>();
         foreach (var f in files)
-            foreach (var it in f.Items)
+            foreach (var it in f.Items.Concat(f.Lists))
             {
                 if (it.IsTodo || it.En == null || it.EnChanged || it.Value.Trim() == "" || it.Value.Contains("TODO")) continue;
                 if (!counts.TryGetValue(it.En, out var d)) counts[it.En] = d = new();

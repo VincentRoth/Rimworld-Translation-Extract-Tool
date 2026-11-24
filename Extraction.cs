@@ -8,10 +8,13 @@ public sealed class Entry
 {
     public string Folder = "";        // dossier DefInjected (type de def)
     public string LegacyFolder = "";  // ancien nom de dossier (classe exacte), pour reprendre les traductions déjà saisies
+    public string? LegacyPath;        // ancienne forme de la clé (TKey inconnu du jeu), pour reprendre les traductions déjà saisies
+    public string? TKeyField;         // menu XML Extensions : champ tKey* qui permet de traduire ce texte par Keyed
     public string File = "";
     public string DefName = "";
     public string Path = "";
     public string Value = "";
+    public string Raw = "";           // texte tel qu'écrit dans le XML (avant normalisation des sauts de ligne)
     public List<string>? Items;       // collection
     public string DefTypeName = "";
     public List<string> TypeChain = new();
@@ -31,6 +34,8 @@ public sealed class KeyedEntry
     public string Key = "";
     public string Value = "";
     public List<string> Usages = new();
+    public string? Carry;             // traduction reprise d'une ancienne clé DefInjected (contenu XML)
+    public string? Note;
 }
 
 public sealed class Extraction
@@ -152,17 +157,26 @@ public sealed class Extraction
         public string Folder = "", LegacyFolder = "", TypeName = "", DefName = "", File = "", Origin = "";
         public List<string> Chain = new();
 
-        public void AddString(string path, string raw, bool marked, string ftype, string? note = null)
+        public string? TKeyField;
+
+        public void AddString(string path, string raw, bool marked, string ftype, string? note = null, string? legacyPath = null, string? prefill = null)
         {
             var v = Norm(raw);
             Defs.Add(new Entry
             {
                 Folder = Folder, LegacyFolder = LegacyFolder, File = File, DefName = DefName, Path = path, Value = v,
                 DefTypeName = TypeName, TypeChain = Chain, Origin = Origin, Marked = marked, FieldType = ftype, Note = note,
+                Raw = raw, LegacyPath = legacyPath, Prefill = prefill, TKeyField = TKeyField,
             });
         }
         public void AddList(string path, List<string> items, bool marked, string? prefill = null)
         {
+            // forme <rep> : texte simple seulement, donc une clé par élément
+            if (!LangXml.ValidName(DefName + "." + path))
+            {
+                for (int i = 0; i < items.Count; i++) AddString(path + "." + i, items[i], marked, "string", prefill: prefill);
+                return;
+            }
             Defs.Add(new Entry
             {
                 Folder = Folder, LegacyFolder = LegacyFolder, File = File, DefName = DefName, Path = path, Items = items.Select(Norm).ToList(),
@@ -176,6 +190,20 @@ public sealed class Extraction
     public const string RulesFilesHint = "fichiers de mots (symbole->chemin sous Strings/, sans .txt). Pré-rempli avec l'anglais : " +
         "les listes traduites vont dans Strings/ au même chemin. À modifier seulement pour découper une liste (féminin, élision, pluriel), " +
         "comme l'officiel (GlobalUtility : BusinessType_Feminine->Words/Nouns/BusinessTypes_Feminine), en adaptant aussi rulesStrings";
+
+    public const string RuleFileHint = "fichier de mots (chemin sous Strings/, sans .txt). Pré-rempli avec l'anglais : la liste traduite va dans " +
+        "Strings/ au même chemin. À modifier seulement pour viser un autre fichier";
+
+    /// <summary>
+    /// XML Extensions settings element: name of its field holding the Keyed key of this text (label, text: tKey ;
+    /// tooltip: tKeyTip ; message: tKeyMessage), null when there is none or the mod already sets it.
+    /// </summary>
+    string? TKeyFor(XmlElement el, Type type, string field)
+    {
+        if (!(type.Namespace ?? "").StartsWith("XmlExtensions")) return null;
+        var tk = field switch { "label" or "text" => "tKey", "tooltip" => "tKeyTip", "message" => "tKeyMessage", _ => null };
+        return tk != null && types.Field(type, tk) != null && el[tk] == null ? tk : null;
+    }
 
     static bool IsString(Type t) => t.FullName == "System.String";
     static bool IsSlateRefString(Type t)
@@ -247,13 +275,23 @@ public sealed class Extraction
                 var sv = c.InnerText.Trim();
                 if (sv.StartsWith("$") || !LooksLikeText(sv) || (!sv.Contains(' ') && c.GetAttribute("TKey") == "")) continue;
                 var tkey = c.GetAttribute("TKey");
-                ctx.AddString((tkey != "" ? tkey : p) + ".slateRef", c.InnerText, true, "SlateRef");
+                // the game only knows the hardcoded TKeys (Core and DLC quests): elsewhere the real path is required
+                if (tkey != "" && types.GameKnowsTKey(ctx.DefName + "." + tkey)) ctx.AddString(tkey + ".slateRef", c.InnerText, true, "SlateRef");
+                else ctx.AddString(p + ".slateRef", c.InnerText, true, "SlateRef", legacyPath: tkey != "" ? tkey + ".slateRef" : null);
                 continue;
             }
             if (IsString(ft))
             {
                 if (c.ChildNodes.OfType<XmlElement>().Any()) continue;
+                // Rule_File d'un rulesRaw : chemin d'un fichier de mots ([MayTranslate]), comme rulesFiles
+                if (f.Field.Name == "path" && f.Field.DeclaringType?.Name == "Rule_File")
+                {
+                    if (c.InnerText.Trim() != "") ctx.AddString(p, c.InnerText, true, "string", prefill: RuleFileHint);
+                    continue;
+                }
+                ctx.TKeyField = TKeyFor(el, type, f.Field.Name);
                 if (Accept(f, c.InnerText, p)) ctx.AddString(p, c.InnerText, f.MustTranslate, "string");
+                ctx.TKeyField = null;
             }
             else if (IsListType(ft, out var et))
             {
@@ -267,6 +305,11 @@ public sealed class Extraction
                     if (items.Count > 0 && f.CanChangeCount && f.Field.Name == "rulesFiles" && f.Field.DeclaringType?.Name == "RulePack")
                     {
                         ctx.AddList(p, items, true, RulesFilesHint);
+                        continue;
+                    }
+                    if (items.Count > 0 && f.Field.Name == "pathList" && f.Field.DeclaringType?.Name == "Rule_File")
+                    {
+                        ctx.AddList(p, items, true, RuleFileHint);
                         continue;
                     }
                     if (items.Count > 0 && !f.NoTranslate && (f.MustTranslate || (IncludeUnmarked && items.Any(x => LooksLikeText(x)))))
@@ -302,23 +345,25 @@ public sealed class Extraction
     /// <summary>Éléments d'une liste d'objets avec leur handle de traduction (suffixé -N si plusieurs identiques).</summary>
     List<(XmlElement li, Type type, string handle)> ItemHandles(List<XmlElement> lis, Type et)
     {
-        var infos = new List<(XmlElement li, Type type, string handle)>();
-        int idx = 0;
-        foreach (var li in lis)
+        // like TranslationHandleUtility.GetBestHandleWithIndexForListElement: the handle is the value of the handle field
+        // of highest priority; its number counts every element whose same field has that value, whatever its own best handle
+        var infos = lis.Select(li =>
         {
-            var itemType = et;
             var cls = li.GetAttribute("Class");
-            if (cls != "") itemType = types.Resolve(cls) ?? et;
-            infos.Add((li, itemType, HandleFor(li, itemType, idx)));
-            idx++;
-        }
-        var counts = infos.GroupBy(i => i.handle).ToDictionary(g => g.Key, g => g.Count());
-        var occ = new Dictionary<string, int>();
+            var itemType = cls != "" ? types.Resolve(cls) ?? et : et;
+            return (li, itemType, vals: HandleValues(li, itemType));
+        }).ToList();
         var res = new List<(XmlElement, Type, string)>();
-        foreach (var (li, itemType, handle) in infos)
+        for (int i = 0; i < infos.Count; i++)
         {
-            var h = handle;
-            if (counts[handle] > 1) { occ[handle] = occ.GetValueOrDefault(handle); h = handle + "-" + occ[handle]; occ[handle]++; }
+            var (li, itemType, vals) = infos[i];
+            string h = i.ToString();   // no handle, or nothing left of it once normalized (Chinese label): index
+            if (vals.Count > 0 && vals[0].handle != "")
+            {
+                var (field, handle) = vals[0];
+                var same = Enumerable.Range(0, infos.Count).Where(j => infos[j].vals.Any(v => v.field == field && v.handle == handle)).ToList();
+                h = same.Count > 1 ? handle + "-" + same.IndexOf(i) : handle;
+            }
             res.Add((li, itemType, h));
         }
         return res;
@@ -355,17 +400,28 @@ public sealed class Extraction
 
     static string Sanitize(string v)
     {
-        v = Regex.Replace(v, @"{[^{}]*}", "");
-        v = v.Replace(' ', '_');
+        // TranslationHandleUtility.NormalizedHandle
+        v = Regex.Replace(v.Trim(), "{.*?}", "");
+        v = Regex.Replace(v, @"[ \n\t]", "_");
         v = Regex.Replace(v, @"[^A-Za-z0-9_]", "");
         v = Regex.Replace(v, "_+", "_").Trim('_');
-        return v == "" ? "x" : v;
+        return v != "" && v.All(char.IsDigit) ? "_" + v : v;
     }
 
-    string HandleFor(XmlElement li, Type itemType, int idx)
+    /// <summary>Handle fields of a list element with a value, best first: (field, normalized value).</summary>
+    List<(string field, string handle)> HandleValues(XmlElement li, Type itemType)
     {
+        var res = new List<(string, string)>();
         foreach (var hf in types.HandleFields(itemType))
         {
+            var id = hf.Field.DeclaringType?.FullName + "." + hf.Field.Name;
+            // QuestNode: set by the constructor from the class name
+            if (hf.Field.Name == "myTypeShort" && hf.Field.DeclaringType?.Name == "QuestNode")
+            {
+                var n = itemType.Name;
+                res.Add((id, Sanitize(n.StartsWith("QuestNode_") ? n["QuestNode_".Length..] : n)));
+                continue;
+            }
             var name = hf.Field.Name;
             string? val = li[name]?.InnerText.Trim();
             if (val == null && name.StartsWith("untranslated") && name.Length > 12)
@@ -378,10 +434,10 @@ public sealed class Extraction
             if (!string.IsNullOrEmpty(val))
             {
                 if (hf.Field.FieldTypeSafe().FullName == "System.Type" && val.Contains('.')) val = val[(val.LastIndexOf('.') + 1)..];
-                return Sanitize(val);
+                res.Add((id, Sanitize(val)));
             }
         }
-        return idx.ToString();
+        return res;
     }
 
     // -------------------- Keyed --------------------

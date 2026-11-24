@@ -46,6 +46,14 @@ public static class StringsFiles
                 l.Add($"{e.DefName} ([{parts[0].Trim()}])");
             }
 
+        // Rule_File de rulesRaw (path, pathList)
+        foreach (var e in entries.Where(e => e.Prefill == Extraction.RuleFileHint))
+            foreach (var it in e.Items ?? new List<string> { e.Value })
+            {
+                if (!users.TryGetValue(it.Trim(), out var l)) users[it.Trim()] = l = new();
+                l.Add(e.DefName);
+            }
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var folder in mod.Folders)
         {

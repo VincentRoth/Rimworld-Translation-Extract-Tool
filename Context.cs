@@ -126,9 +126,10 @@ public sealed class OfficialFr
                         try { doc = XDocument.Load(te.DataStream); } catch { continue; }
                         foreach (var el in doc.Root?.Elements() ?? Enumerable.Empty<XElement>())
                         {
-                            var val = el.HasElements ? string.Join(" | ", el.Elements("li").Select(x => x.Value)) : el.Value;
-                            if (isDef) defs[parts[1] + "/" + el.Name.LocalName] = val;
-                            else keyed[el.Name.LocalName] = val;
+                            var (key, ve) = LangXml.Read(el);
+                            var val = ve.HasElements ? string.Join(" | ", ve.Elements("li").Select(x => x.Value)) : ve.Value;
+                            if (isDef) defs[parts[1] + "/" + key] = val;
+                            else keyed[key] = val;
                         }
                     }
                 }

@@ -79,14 +79,18 @@ public sealed class Pipeline
         catch (Exception ex) { Rep.Warn($"Patch illisible {file}: {ex.Message}"); }
     }
 
-    public XmlDocument Build(bool includeTargetPatches)
+    /// <summary>The target mod has patches depending on one of its options (both branches are run with options: true).</summary>
+    public bool TargetHasOptions => Patches.Any(p => p.Mod == Target && PatchEngine.UsesOptions(p.Op));
+
+    public XmlDocument Build(bool includeTargetPatches, bool options = false)
     {
         var doc = (XmlDocument)BaseDoc.CloneNode(true);
         var engine = new PatchEngine(doc, ActiveIds, ActiveNames, Rep);
         foreach (var p in Patches)
         {
             if (!includeTargetPatches && p.Mod == Target) continue;
-            engine.Run(p.Op, p.Mod, p.File, includeTargetPatches);
+            engine.Options = options && p.Mod == Target;
+            engine.Run(p.Op, p.Mod, p.File, includeTargetPatches && !options);
         }
         PruneMayRequire(doc);
         ResolveInheritance(doc);

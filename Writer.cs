@@ -18,7 +18,7 @@ public sealed class LanguageWriter
     readonly ContextResolver ctx;
     readonly OfficialFr official;
     readonly Report rep;
-    public int Written, Preserved, Changed, Obsolete;
+    public int Written, Preserved, Changed, Obsolete, Renamed;
     readonly HashSet<string> writtenPaths = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -88,14 +88,17 @@ public sealed class LanguageWriter
                     {
                         // traduction d'une clé disparue : la relire pour qu'elle survive aux réextractions suivantes
                         // (et soit réutilisée si la clé revient)
-                        var m = Regex.Match(t, @"<(?<k>[^>\s/]+)>(?<v>.*)</\k<k>>", RegexOptions.Singleline);
-                        if (m.Success && !ex.Map.ContainsKey(m.Groups["k"].Value)) ex.Map[m.Groups["k"].Value] = (m.Groups["v"].Value, null);
+                        if (LangXml.Parse(t) is { } o && !ex.Map.ContainsKey(o.key))
+                        {
+                            var oen = Regex.Match(o.rest, @"^\s*EN: (.*)$", RegexOptions.Singleline);
+                            ex.Map[o.key] = (o.inner, oen.Success ? oen.Groups[1].Value.Trim() : null);
+                        }
                     }
                 }
                 else if (n is XElement e)
                 {
-                    var inner = string.Concat(e.Nodes().Select(x => x.ToString()));
-                    ex.Map[e.Name.LocalName] = (inner, en);
+                    var (key, value) = LangXml.Read(e);
+                    ex.Map[key] = (string.Concat(value.Nodes().Select(x => x.ToString())), en);
                     en = null;
                 }
             }
@@ -128,9 +131,11 @@ public sealed class LanguageWriter
                         if (!existing.Map.TryGetValue(kv.Key, out var cur) || IsPlaceholder(cur.inner)) existing.Map[kv.Key] = kv.Value;
             var used = new HashSet<string>();
             var seenKeys = new HashSet<string>();
+            var vanished = Vanished(existing, g.Select(e => e.Key));
             foreach (var e in g)
             {
                 if (!seenKeys.Add(e.Key)) continue;
+                Rename(existing, vanished, used, e.Key, e.LegacyPath == null ? null : e.DefName + "." + e.LegacyPath, e.Value, e.Items);
                 used.Add(e.Key);
                 var (c, max, isShort) = ctx.ForDef(e);
                 if (e.Note != null) c = (string.IsNullOrEmpty(c) ? "" : c + " | ") + "Texte absent du XML : " + e.Note;
@@ -169,12 +174,15 @@ public sealed class LanguageWriter
             var sb = Header();
             var existing = opt.Fresh ? new Existing() : LoadExisting(path);
             var used = new HashSet<string>();
+            var vanished = Vanished(existing, g.Select(k => k.Key));
             foreach (var k in g)
             {
+                Rename(existing, vanished, used, k.Key, null, k.Value, null);
+                if (k.Carry != null && (!existing.Map.TryGetValue(k.Key, out var cur) || IsPlaceholder(cur.inner))) existing.Map[k.Key] = (k.Carry, San(k.Value).Trim());
                 used.Add(k.Key);
                 var (c, max, isShort) = ctx.ForKeyed(k);
                 var usage = k.Usages.Count > 0 ? ContextResolver.UsageHint(k.Usages) : "";
-                string? ctxText = c;
+                string? ctxText = k.Note != null ? (string.IsNullOrEmpty(c) ? "" : c + " | ") + k.Note : c;
                 if (!string.IsNullOrEmpty(usage)) ctxText = (ctxText == null ? "" : ctxText + " | ") + "utilisé dans : " + usage;
                 var fr = official.Keyed(k.Key);
                 EmitEntry(sb, k.Key, k.Value, null, ctxText, max, isShort, true, fr, existing,
@@ -184,6 +192,60 @@ public sealed class LanguageWriter
             Footer(sb);
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true)); writtenPaths.Add(Path.GetFullPath(path));
         }
+    }
+
+    /// <summary>
+    /// Translations of the plain texts of one written file, by English text: used to carry the translations of defs
+    /// the game cannot reach over to Keyed (DottedMenus).
+    /// </summary>
+    public Dictionary<string, string> ByEnglish(string relPath)
+    {
+        var res = new Dictionary<string, string>();
+        if (opt.Fresh) return res;
+        foreach (var v in LoadExisting(Path.Combine(opt.OutDir, relPath)).Map.Values)
+            if (v.en != null && !IsPlaceholder(v.inner) && !v.inner.Contains("<li>")) res.TryAdd(v.en, v.inner.Trim());
+        return res;
+    }
+
+    // -------------------- clés renommées --------------------
+
+    public static string EnKey(string value, List<string>? items = null) => items != null ? LiKey(items) : San(value).Trim();
+    static string EnKeyOf(string comment) => comment.Contains("<li>") ? string.Join("\u0001", LiValues(comment)) : comment;
+    /// <summary>List items as <see cref="LiValues"/> reads them back from the EN comment.</summary>
+    static string LiKey(List<string> items) => string.Join("\u0001", LiValues(string.Concat(items.Select(i => "<li>" + San(i) + "</li>"))));
+
+    readonly Dictionary<string, string> renamedFrom = new();
+
+    /// <summary>Existing translations whose key is no longer produced, by key.</summary>
+    Dictionary<string, (string inner, string? en)> Vanished(Existing existing, IEnumerable<string> keys)
+    {
+        var now = keys.ToHashSet();
+        return existing.Map.Where(kv => !now.Contains(kv.Key) && !IsPlaceholder(kv.Value.inner)).ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+
+    /// <summary>
+    /// New key without translation: take over the translation of its former key (legacy), else of the vanished keys of
+    /// the same file that had exactly the same English text, when they all have the same translation.
+    /// </summary>
+    void Rename(Existing existing, Dictionary<string, (string inner, string? en)> vanished, HashSet<string> used, string key, string? legacy, string value, List<string>? items)
+    {
+        renamedFrom.Remove(key);
+        if (vanished.Count == 0) return;
+        if (existing.Map.TryGetValue(key, out var cur) && !IsPlaceholder(cur.inner)) return;
+        var en = EnKey(value, items);
+        if (en == "") return;
+        if (legacy != null && vanished.TryGetValue(legacy, out var old) && (old.en == null || EnKeyOf(old.en) == en))
+        {
+            existing.Map[key] = (old.inner, old.en ?? en);
+            used.Add(legacy); Renamed++;
+            return;
+        }
+        var same = vanished.Where(v => v.Value.en != null && EnKeyOf(v.Value.en) == en).ToList();
+        if (same.Count == 0 || same.Select(v => v.Value.inner.Trim()).Distinct().Count() > 1) return;
+        existing.Map[key] = same[0].Value;
+        renamedFrom[key] = same[0].Key;
+        foreach (var v in same) used.Add(v.Key);
+        Renamed++;
     }
 
     // -------------------- commun --------------------
@@ -239,18 +301,27 @@ public sealed class LanguageWriter
             bool isPlaceholder = exInner == opt.Placeholder || (opt.PrefillEn && exInner == Esc(enText)) || exInner.Contains("<li>" + opt.Placeholder + "</li>");
             // pré-remplissage jamais modifié : suivre l'anglais s'il a changé (sinon on garderait l'ancien anglais)
             if (prefill != null && items != null && ex.en != null && LiValues(exInner).SequenceEqual(LiValues(ex.en))) isPlaceholder = true;
+            if (prefill != null && items == null && ex.en != null && EnKey(System.Net.WebUtility.HtmlDecode(exInner)) == ex.en) isPlaceholder = true;
             if (!isPlaceholder && exInner != "")
             {
                 keep = ex.inner;
                 Preserved++;
-                if (ex.en != null && ex.en != (items != null ? "" : value) && items == null)
+                if (renamedFrom.TryGetValue(key, out var from))
+                    sb.Append("  <!-- Auto (clé renommée par le mod, reprise de ").Append(San(from)).Append(") : à relire -->\n");
+                if (ex.en != null && items != null && ex.en.Contains("<li>") && EnKeyOf(ex.en) != LiKey(items))
+                {
+                    sb.Append("  <!-- ATTENTION : liste EN modifiée depuis la traduction. Anciens éléments EN: ").Append(San(string.Join(" ¶ ", LiValues(ex.en)))).Append(" -->\n");
+                    Changed++;
+                }
+                // the comment holds the text with "--" written "- -": compare in that form
+                else if (ex.en != null && items == null && ex.en != EnKey(value))
                 {
                     sb.Append("  <!-- ATTENTION : texte EN modifié depuis la traduction. Ancien EN: ").Append(San(ex.en)).Append(" -->\n");
                     Changed++;
                 }
             }
         }
-        sb.Append("  <").Append(key).Append('>');
+        sb.Append("  ").Append(LangXml.Open(key));
         if (keep != null) sb.Append(keep);
         else if (items != null)
         {
@@ -261,7 +332,7 @@ public sealed class LanguageWriter
         }
         else if (value.Trim() == "") { /* empty English text: nothing to translate, left empty (not TODO) */ }
         else sb.Append(opt.PrefillEn || prefill != null ? Esc(value) : opt.Placeholder);
-        sb.Append("</").Append(key).Append(">\n\n");
+        sb.Append(LangXml.Close(key)).Append("\n\n");
         Written++;
     }
 
@@ -276,8 +347,10 @@ public sealed class LanguageWriter
             if (used.Contains(kv.Key)) continue;
             var inner = kv.Value.inner.Trim();
             if (inner == opt.Placeholder) continue;
-            sb.Append("  <!-- OBSOLETE (clé disparue de l'extraction) : <").Append(kv.Key).Append('>')
-              .Append(San(inner)).Append("</").Append(kv.Key).Append("> -->\n\n");
+            sb.Append("  <!-- OBSOLETE (clé disparue de l'extraction) : ").Append(LangXml.Open(kv.Key))
+              .Append(San(inner)).Append(LangXml.Close(kv.Key));
+            if (!string.IsNullOrEmpty(kv.Value.en)) sb.Append(" EN: ").Append(San(kv.Value.en!));   // found again if the key is renamed
+            sb.Append(" -->\n\n");
             Obsolete++;
         }
     }
@@ -309,16 +382,17 @@ public static class Checker
                 else if (n is XElement e)
                 {
                     total++;
-                    var val = e.HasElements ? string.Join(" | ", e.Elements("li").Select(x => x.Value)) : e.Value;
+                    var (key, ve) = LangXml.Read(e);
+                    var val = ve.HasElements ? string.Join(" | ", ve.Elements("li").Select(x => x.Value)) : ve.Value;
                     var rel = Path.GetFileName(f);
-                    if (val.Contains("TODO")) { todo++; Console.WriteLine($"TODO       {rel}: {e.Name.LocalName}"); }
+                    if (val.Contains("TODO")) { todo++; Console.WriteLine($"TODO       {rel}: {key}"); }
                     else
                     {
                         var shown = DisplayLength(val);
-                        if (max != null && shown > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {e.Name.LocalName} ({shown}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {e.Name.LocalName} ({shown}>{max}) {val}"); } }
+                        if (max != null && shown > max) { if (soft) { softLong++; Console.WriteLine($"LONG (souple) {rel}: {key} ({shown}>{max}) {val}"); } else { tooLong++; Console.WriteLine($"TROP LONG  {rel}: {key} ({shown}>{max}) {val}"); } }
                         if (en != null)
                             foreach (var ph in ContextResolver.FindPlaceholders(en))
-                                if (ph.StartsWith("{") && !val.Contains(ph) && !PronounReplaced(ph, val)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {e.Name.LocalName} manque {ph}"); }
+                                if (ph.StartsWith("{") && !val.Contains(ph) && !PronounReplaced(ph, val)) { missingPh++; Console.WriteLine($"PLACEHOLDER {rel}: {key} manque {ph}"); }
                     }
                     en = null; max = null; soft = false;
                 }

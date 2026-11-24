@@ -148,6 +148,8 @@ public sealed class TypeIndex : IDisposable
                         switch (a.AttributeType.FullName)
                         {
                             case "Verse.MustTranslateAttribute": ex.MustTranslate = true; break;
+                            // the game refuses [Unsaved] fields like [NoTranslate] ones (DefInjectionPackage.SetDefFieldAtPath)
+                            case "Verse.UnsavedAttribute":
                             case "Verse.NoTranslateAttribute": ex.NoTranslate = true; break;
                             case "Verse.TranslationCanChangeCountAttribute": ex.CanChangeCount = true; break;
                             case "Verse.TranslationHandleAttribute":
@@ -247,6 +249,45 @@ public sealed class TypeIndex : IDisposable
             catch { }
         }
         return null;
+    }
+
+    HashSet<string>? gameTKeys;
+
+    /// <summary>
+    /// "defName.TKey" known to the game. The table is hardcoded (Verse.TKeySystemHardcodedMapping, used instead of the
+    /// TKey attributes of the XML): a TKey defined by a mod does not exist for the game, its key is the real path.
+    /// </summary>
+    public bool GameKnowsTKey(string tKeyPath)
+    {
+        if (gameTKeys == null)
+        {
+            gameTKeys = new();
+            try
+            {
+                var t = Resolve("Verse.TKeySystemHardcodedMapping");
+                var p = t == null ? null : Pe(t.Assembly.Location);
+                if (p != null && p.Value.types.TryGetValue(t!.FullName!, out var th))
+                {
+                    var (pe, md, _) = p.Value;
+                    foreach (var mh in md.GetTypeDefinition(th).GetMethods())
+                    {
+                        var m = md.GetMethodDefinition(mh);
+                        if (md.GetString(m.Name) != ".cctor" || m.RelativeVirtualAddress == 0) continue;
+                        var il = pe.GetMethodBody(m.RelativeVirtualAddress).GetILBytes() ?? Array.Empty<byte>();
+                        // dup ; ldstr key ; ldstr value ; callvirt Add
+                        for (int i = 0; i + 11 < il.Length; i++)
+                        {
+                            if (il[i] != 0x25 || il[i + 1] != 0x72 || il[i + 6] != 0x72 || il[i + 11] != 0x6F) continue;
+                            gameTKeys.Add(md.GetUserString(MetadataTokens.UserStringHandle(BitConverter.ToInt32(il, i + 2) & 0x00FFFFFF)));
+                            i += 11;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { rep.Warn("TKeySystemHardcodedMapping illisible : " + ex.Message); }
+            if (gameTKeys.Count == 0) rep.Warn("TKeySystemHardcodedMapping introuvable : tous les TKey sont supposés connus du jeu.");
+        }
+        return gameTKeys.Count == 0 || gameTKeys.Contains(tKeyPath);
     }
 
     readonly Dictionary<Type, Dictionary<string, string>> strDefaultCache = new();

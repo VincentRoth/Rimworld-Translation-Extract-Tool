@@ -40,7 +40,7 @@ public sealed class ShippedFrench
                     {
                         var doc = XDocument.Load(f);
                         foreach (var el in doc.Root?.Elements() ?? Enumerable.Empty<XElement>())
-                            (isKeyed ? s.KeyedKeys : s.DefKeys).Add(el.Name.LocalName);
+                            (isKeyed ? s.KeyedKeys : s.DefKeys).Add(LangXml.Read(el).key);
                     }
                     catch (Exception ex) { rep.Warn($"Traduction fournie illisible {f}: {ex.Message}"); }
                 }

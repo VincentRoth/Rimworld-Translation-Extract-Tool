@@ -133,12 +133,13 @@ public static class CompareRef
                         continue;
                     }
                     if (n is not XmlElement e) continue;
-                    var lis = e.ChildNodes.OfType<XmlElement>().Where(c2 => c2.Name == "li").Select(c2 => c2.InnerText.Trim()).ToList();
-                    var text = lis.Count > 0 ? string.Join(Worksheet.ItemSep, lis) : e.InnerText.Trim();
+                    var (ekey, ev) = LangXml.Read(e);
+                    var lis = ev.ChildNodes.OfType<XmlElement>().Where(c2 => c2.Name == "li").Select(c2 => c2.InnerText.Trim()).ToList();
+                    var text = lis.Count > 0 ? string.Join(Worksheet.ItemSep, lis) : ev.InnerText.Trim();
                     var thisEn = en; en = "";
                     if (text == "" || text == placeholder || lis.Contains(placeholder)) continue;
                     // a DefInjected key may be written with a subclass folder name: keep the key itself as identity
-                    d[(type == "Keyed" ? "Keyed" : "Def") + "|" + e.Name] = new Val { Type = type, Key = e.Name, Text = text, En = thisEn };
+                    d[(type == "Keyed" ? "Keyed" : "Def") + "|" + ekey] = new Val { Type = type, Key = ekey, Text = text, En = thisEn };
                 }
             }
         return d;
@@ -180,7 +181,7 @@ public static class CompareRef
                 {
                     var x = new XmlDocument();
                     try { x.Load(file); } catch { continue; }
-                    if (x.DocumentElement != null) foreach (var e in x.DocumentElement.ChildNodes.OfType<XmlElement>()) keys.Add(e.Name);
+                    if (x.DocumentElement != null) foreach (var e in x.DocumentElement.ChildNodes.OfType<XmlElement>()) keys.Add(LangXml.Read(e).key);
                 }
         }
         return (defs, keys);

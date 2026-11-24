@@ -190,6 +190,17 @@ Options :
             var docB = pipe.Build(true);
             if (dumpDef != null) foreach (var n in docB.SelectNodes("//*[defName='" + dumpDef + "']")!.OfType<System.Xml.XmlElement>()) Console.WriteLine(n.OuterXml);
             var entriesB = ext.ExtractDefs(docB, o => true);
+            // textes que seules les options du mod ajoutent (patchs OptionalPatch, PatchOperationModOption…) : clés nouvelles
+            // seulement, un texte existant modifié par une option garderait sa traduction quand l'option est désactivée
+            List<Entry> fromOptions = new();
+            if (assumeAll && !mod.Official && pipe.TargetHasOptions)
+            {
+                var known = entriesB.Select(e => e.Folder + "/" + e.Key).ToHashSet();
+                fromOptions = ext.ExtractDefs(pipe.Build(true, options: true), o => true).Where(e => !known.Contains(e.Folder + "/" + e.Key)).ToList();
+                // un élément de plus renumérote les handles identiques (x -> x-0) : pas une nouvelle clé
+                fromOptions = NotRenumbered(fromOptions, entriesB);
+                rep.Notes.Add($"Textes ajoutés par les patchs liés à une option du mod (désactivée par défaut) : {fromOptions.Count}");
+            }
             Console.WriteLine($"Entrées brutes : {entriesB.Count}  ({sw.Elapsed.TotalSeconds:F1}s)");
 
             if (mod.Official) return entriesB.Where(e => e.Origin == tid).ToList();
@@ -206,7 +217,7 @@ Options :
             else foreach (var e in foreign) baseline.Add(e.Folder + "/" + e.Key + "\n" + e.Sig);
             var changed = foreign.Where(e => !baseline.Contains(e.Folder + "/" + e.Key + "\n" + e.Sig)).ToList();
             if (note) rep.Notes.Add($"Defs du mod : {own.Count} entrées ; textes ajoutés/modifiés par ses patchs sur d'autres mods : {changed.Count}");
-            return own.Concat(changed).ToList();
+            return own.Concat(changed).Concat(fromOptions).ToList();
         }
 
         var wantAll = GameEnv.AssumeAll;
@@ -216,7 +227,7 @@ Options :
             var first = Collect(false, false);
             var all = Collect(true, true);    // laisse mod.Folders au maximum (Keyed de tous les dossiers)
             var seen = first.Select(e => e.Folder + "/" + e.Key).ToHashSet();
-            var onlyAll = all.Where(e => !seen.Contains(e.Folder + "/" + e.Key)).ToList();
+            var onlyAll = NotRenumbered(all.Where(e => !seen.Contains(e.Folder + "/" + e.Key)), first);
             rep.Notes.Add($"Textes propres aux variantes conditionnelles (dossiers IfModActive, MayRequire, FindMod, CE...) : {onlyAll.Count} entrées en plus du mod seul");
             entries = first.Concat(onlyAll).ToList();
             var du = rep.UnknownTypes.Distinct().ToList(); rep.UnknownTypes.Clear(); rep.UnknownTypes.AddRange(du);
@@ -258,6 +269,7 @@ Options :
         var rules = new ContextResolver(Path.Combine(ToolDir(), "context-rules.json"));
         var wo = new WriterOptions { OutDir = langDir, Placeholder = placeholder, PrefillEn = prefill, Fresh = fresh };
         var writer = new LanguageWriter(wo, rules, new OfficialFr(env.GameDir), rep);
+        DottedDefs.Convert(entries, keyed, writer, outDir, rep);
         writer.WriteDefs(entries, tid);
         writer.WriteKeyed(keyed);
         writer.CleanOrphans();
@@ -268,9 +280,21 @@ Options :
         WriteReport(outDir, mod, entries, keyed, writer, rep, env);
         Console.WriteLine($"\n{writer.Written} entrées écrites ({entries.Count} defs, {keyed.Count} keyed), {writer.Preserved} traductions conservées, " +
                           $"{writer.Changed} EN modifiés, {writer.Obsolete} obsolètes.");
+        if (writer.Renamed > 0) Console.WriteLine($"{writer.Renamed} traductions reprises d'une clé renommée (commentaire « Auto (clé renommée… » à relire, sauf TKey de quête).");
         Console.WriteLine($"Sortie : {langDir}");
         Console.WriteLine($"Rapport : {Path.Combine(outDir, "report.txt")}  ({sw.Elapsed.TotalSeconds:F1}s)");
         return 0;
+    }
+
+    /// <summary>
+    /// Without the entries that a second pass only renumbered: "x-0" is "x" when another "x" was added after it
+    /// (the game reads "x" as the first one, loading both gives a "Duplicate" error).
+    /// </summary>
+    static List<Entry> NotRenumbered(IEnumerable<Entry> added, List<Entry> before)
+    {
+        var sigs = before.Select(e => e.Folder + "/" + e.Key + "\n" + e.Sig).ToHashSet();
+        return added.Where(e => !e.Path.Contains("-0")
+            || !sigs.Contains(e.Folder + "/" + e.DefName + "." + Regex.Replace(e.Path, @"-0(?=\.|$)", "") + "\n" + e.Sig)).ToList();
     }
 
     /// <summary>Textes que le mod ne met que dans sa traduction anglaise (Languages/English*/DefInjected), absents du XML
