@@ -161,6 +161,8 @@ public static class TranslationMemory
         if (target.Equals("all", StringComparison.OrdinalIgnoreCase) && !Directory.Exists(target)) return RunAll(outRoot, lang, placeholder);
         var files = LangFile.FindFiles(target, outRoot, lang).Select(p => LangFile.Load(p, placeholder)).ToList();
         var targetPaths = files.Select(f => System.IO.Path.GetFullPath(f.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var sameDef = SameDefCopies(files, outRoot);
+        if (sameDef > 0) Console.WriteLine($"Même texte qu'un autre champ de la def (implicit-rules.json, sameText) : {sameDef} entrées remplies");
 
         var local = BuildMemory(files);
         Dictionary<string, List<Entry>>? other = null;
@@ -227,9 +229,11 @@ public static class TranslationMemory
         var global = BuildMemory(byMod.SelectMany(m => m.files).ToList());
 
         int todo = 0, fromLocal = 0, fromOther = 0, conflicts = 0, skipped = 0, mods = 0;
+        int sameDefTotal = 0;
         var conflictList = new List<string>();
         foreach (var (mod, files) in byMod)
         {
+            sameDefTotal += SameDefCopies(files, outRoot);
             var local = BuildMemory(files);
             int before = fromLocal + fromOther;
             foreach (var f in files)
@@ -251,6 +255,7 @@ public static class TranslationMemory
             if (fromLocal + fromOther > before) mods++;
         }
 
+        Console.WriteLine($"Même texte qu'un autre champ de la def (implicit-rules.json, sameText) : {sameDefTotal} entrées remplies");
         Console.WriteLine($"Mémoire de traduction (tout out\\) : {global.Count} textes anglais déjà traduits, {byMod.Count} mods");
         Console.WriteLine($"Entrées TODO : {todo}  ->  remplies : {fromLocal + fromOther} dans {mods} mods (même mod : {fromLocal}, autres mods : {fromOther}), restantes : {todo - fromLocal - fromOther}");
         var left = byMod.SelectMany(m => m.files).SelectMany(f => f.Items.Concat(f.Lists)).Where(i => i.IsTodo).ToList();
@@ -264,6 +269,49 @@ public static class TranslationMemory
             foreach (var s in conflictList) Console.WriteLine("  " + s);
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Same-def copies (rules of implicit-rules.json with "sameText"): a TODO entry whose English is copied by the game
+    /// from another field of the same def (scenario.name = label, SkillDef.label = skillLabel, label of a single verb =
+    /// item name) takes the translation of that field when the English texts are identical.
+    /// </summary>
+    static int SameDefCopies(List<LangFile> files, string outRoot)
+    {
+        var rules = CompanionFile.Load(System.IO.Path.Combine(outRoot, "..", "implicit-rules.json")).Companions
+            .Where(r => r.SameText && !r.From.Contains('|')).ToList();
+        if (rules.Count == 0) return 0;
+        // pattern of the target key and the source key, from the def name
+        string Seg(string s) => s == "" ? "" : Regex.Escape(s) + @"\.";
+        var compiled = rules.Select(r =>
+        {
+            var obj = Seg(r.Path) + (r.List == "" ? "" : Regex.Escape(r.List) + @"\.[^.]+\.");
+            var target = new Regex(@"^(?<def>[^.]+)\." + obj + Regex.Escape(r.Field) + "$");
+            Func<string, string, string> source = (def, key) => r.From.StartsWith('^')
+                ? def + "." + r.From[1..]
+                : key[..^r.Field.Length] + r.From;
+            return (type: r.Type, target, source, label: r.From.TrimStart('^'));
+        }).ToList();
+        var done = new Dictionary<(string type, string key, string en), string>();
+        foreach (var f in files)
+            foreach (var it in f.Items)
+                if (!it.IsTodo && it.En != null && !it.EnChanged && !it.Value.Contains("TODO"))
+                    done[(Context(f.Path, it.Key).type, it.Key, it.En)] = it.Value;
+        int n = 0;
+        foreach (var f in files)
+        {
+            var type = Context(f.Path, "").type;
+            foreach (var it in f.Items.Where(i => i.IsTodo && i.En != null).ToList())
+                foreach (var c in compiled.Where(c => c.type == type))
+                {
+                    var m = c.target.Match(it.Key);
+                    if (!m.Success || !done.TryGetValue((type, c.source(m.Groups["def"].Value, it.Key), it.En!), out var v)) continue;
+                    f.Set(it, v, $"Auto (même texte que {c.label} de la def) : à relire");
+                    n++;
+                    break;
+                }
+        }
+        return n;
     }
 
     // where a text sits: def type + place in the def ("label", "tools/label"); Keyed texts are one context

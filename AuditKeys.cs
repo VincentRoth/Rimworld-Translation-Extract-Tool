@@ -47,9 +47,11 @@ public static class AuditKeys
 
         // field name -> (field key, declaring assemblies, usages), [MustTranslate] fields left out
         var byName = new Dictionary<string, List<(string field, HashSet<string> asm, List<FieldUsageIndex.Usage> uses)>>();
+        var anyway = CompanionFile.Load(Path.Combine(outRoot, "..", "implicit-rules.json")).TranslateAnywayKeys();
         foreach (var kv in idx.All)
         {
             if (marked.Contains(kv.Key)) continue;
+            if (anyway.Contains(kv.Key)) continue;   // translated by choice (implicit-rules.json)
             var dot = kv.Key.LastIndexOf('.');
             var type = kv.Key[..dot]; var name = kv.Key[(dot + 1)..];
             if (!typeDlls.TryGetValue(type, out var asm)) continue;

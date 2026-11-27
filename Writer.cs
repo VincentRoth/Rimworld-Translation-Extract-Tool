@@ -68,6 +68,8 @@ public sealed class LanguageWriter
     sealed class Existing
     {
         public Dictionary<string, (string inner, string? en)> Map = new();
+        /// <summary>Review note above a translation ("Auto (...) : à relire"), kept while the translation is kept.</summary>
+        public Dictionary<string, string> Review = new();
     }
 
     Existing LoadExisting(string path)
@@ -78,12 +80,14 @@ public sealed class LanguageWriter
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
             string? en = null;
+            string? review = null;
             foreach (var n in doc.Root!.Nodes())
             {
                 if (n is XComment c)
                 {
                     var t = c.Value.Trim();
                     if (t.StartsWith("EN:")) en = t[3..].Trim();
+                    else if (t.StartsWith("Auto (") && !t.StartsWith("Auto (clé renommée")) review = t;
                     else if (t.StartsWith("OBSOLETE"))
                     {
                         // traduction d'une clé disparue : la relire pour qu'elle survive aux réextractions suivantes
@@ -100,6 +104,8 @@ public sealed class LanguageWriter
                     var (key, value) = LangXml.Read(e);
                     ex.Map[key] = (string.Concat(value.Nodes().Select(x => x.ToString())), en);
                     en = null;
+                    if (review != null) ex.Review[key] = review;
+                    review = null;
                 }
             }
         }
@@ -127,8 +133,15 @@ public sealed class LanguageWriter
                 .Select(f => Path.Combine(opt.OutDir, "DefInjected", f, g.Key.file)).Where(File.Exists).ToList();
             if (!opt.Fresh)
                 foreach (var lp in legacyPaths)
-                    foreach (var kv in LoadExisting(lp).Map)
-                        if (!existing.Map.TryGetValue(kv.Key, out var cur) || IsPlaceholder(cur.inner)) existing.Map[kv.Key] = kv.Value;
+                {
+                    var legacyEx = LoadExisting(lp);
+                    foreach (var kv in legacyEx.Map)
+                        if (!existing.Map.TryGetValue(kv.Key, out var cur) || IsPlaceholder(cur.inner))
+                        {
+                            existing.Map[kv.Key] = kv.Value;
+                            if (legacyEx.Review.TryGetValue(kv.Key, out var rv)) existing.Review[kv.Key] = rv;
+                        }
+                }
             var used = new HashSet<string>();
             var seenKeys = new HashSet<string>();
             var vanished = Vanished(existing, g.Select(e => e.Key));
@@ -308,6 +321,8 @@ public sealed class LanguageWriter
                 Preserved++;
                 if (renamedFrom.TryGetValue(key, out var from))
                     sb.Append("  <!-- Auto (clé renommée par le mod, reprise de ").Append(San(from)).Append(") : à relire -->\n");
+                else if (existing.Review.TryGetValue(key, out var review))
+                    sb.Append("  <!-- ").Append(review).Append(" -->\n");
                 if (ex.en != null && items != null && ex.en.Contains("<li>") && EnKeyOf(ex.en) != LiKey(items))
                 {
                     sb.Append("  <!-- ATTENTION : liste EN modifiée depuis la traduction. Anciens éléments EN: ").Append(San(string.Join(" ¶ ", LiValues(ex.en)))).Append(" -->\n");

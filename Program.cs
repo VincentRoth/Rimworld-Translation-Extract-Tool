@@ -467,6 +467,11 @@ Options :
         var missing = official.Where(k => !mine.Contains(k)).OrderBy(k => k).ToList();
         var extra = mine.Where(k => !official.Contains(k)).OrderBy(k => k).ToList();
         Console.WriteLine($"Officiel : {official.Count}  Extrait : {mine.Count}  (marqués : {mineMarked.Count})");
+        // full lists, for analysis (the console shows 40 of each)
+        var calDir = Path.Combine(ToolDir(), "out", "_calibrate");
+        Directory.CreateDirectory(calDir);
+        File.WriteAllLines(Path.Combine(calDir, Path.GetFileName(mod.Root) + "_manquants.txt"), missing, new UTF8Encoding(true));
+        File.WriteAllLines(Path.Combine(calDir, Path.GetFileName(mod.Root) + "_en_trop.txt"), extra, new UTF8Encoding(true));
         Console.WriteLine($"Manquants (dans FR officiel, pas extraits) : {missing.Count}");
         foreach (var k in missing.Take(40)) Console.WriteLine("  - " + k);
         Console.WriteLine($"En trop (extraits, absents du FR officiel) : {extra.Count}");

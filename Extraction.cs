@@ -137,6 +137,7 @@ public sealed class Extraction
                 var ff = types.Field(objType, r.Field);
                 if (ff == null || ff.NoTranslate || !IsString(ff.Field.FieldTypeSafe())) continue;
                 if (Text(obj, r.Field) != null) continue;
+                if (r.When != "" && !r.When.Split('|', StringSplitOptions.RemoveEmptyEntries).Any(w => (w.StartsWith('^') ? Text(root, w[1..]) : Text(obj, w)) is { } wv && !Regex.IsMatch(wv, @"^[-+]?0*([.,]0*)?$"))) continue;
                 string? src = null;
                 foreach (var s in r.From.Split('|', StringSplitOptions.RemoveEmptyEntries))
                 {
@@ -211,6 +212,29 @@ public sealed class Extraction
         try { return t.IsGenericType && t.Name.StartsWith("SlateRef") && t.GetGenericArguments() is [var a] && IsString(a); }
         catch { return false; }
     }
+    // SlateRef<object>: QuestNode_Set.value, PrefixCapturedVar.value (QuestNode_SubScript/Prefix parms). Holds text, numbers,
+    // defs or "$" expressions: text only with a TKey or a sentence that is not an expression.
+    static bool IsSlateRefObject(Type t)
+    {
+        try { return t.IsGenericType && t.Name.StartsWith("SlateRef") && t.GetGenericArguments() is [var a] && a.FullName == "System.Object"; }
+        catch { return false; }
+    }
+
+    /// <summary>Quest text held by a SlateRef (string or object): key "TKey.slateRef" when the game knows the TKey, else "path.slateRef".</summary>
+    void AddSlateText(XmlElement c, string p, Ctx ctx, bool objectValue, string tkeySuffix = ".slateRef")
+    {
+        if (c.ChildNodes.OfType<XmlElement>().Any()) return;
+        var sv = c.InnerText.Trim();
+        var tkey = c.GetAttribute("TKey");
+        // slate references in brackets ("[../joiner_nameDef]") are not file paths
+        var probe = Regex.Replace(sv, @"\[[^\]]*\]", "X");
+        if (sv.StartsWith("$") || !(LooksLikeText(sv) || LooksLikeText(probe)) || (!sv.Contains(' ') && tkey == "")) return;
+        // object values also carry expressions and def lists: a sentence (letters, at least two words) or a TKey
+        if (objectValue && tkey == "" && (sv.Contains("$(") || !Regex.IsMatch(sv, @"\p{L}+\s+\p{L}+"))) return;
+        // the game only knows the hardcoded TKeys (Core and DLC quests): elsewhere the real path is required
+        if (tkey != "" && types.GameKnowsTKey(ctx.DefName + "." + tkey)) ctx.AddString(tkey + tkeySuffix, c.InnerText, true, "SlateRef");
+        else ctx.AddString(p + ".slateRef", c.InnerText, true, "SlateRef", legacyPath: tkey != "" ? tkey + tkeySuffix : null);
+    }
     static bool IsListType(Type t, out Type elem)
     {
         elem = null!;
@@ -266,6 +290,8 @@ public sealed class Extraction
             else if (tk != null && oneWord) reason = $"transkey : {tk.Where}";
         }
         if (reason == null) return true;
+        // exception chosen by the user (implicit-rules.json, "translateAnyway"): translated knowing the lookup may break
+        if (Companions.TranslateAnywayKeys().Contains(FieldUsageIndex.Key(f.Field))) return true;
         if (curOrigin == CountOrigin)
         {
             var fk = FieldUsageIndex.Key(f.Field);
@@ -277,7 +303,7 @@ public sealed class Extraction
 
     void WalkClass(XmlElement el, Type type, string path, Ctx ctx, int depth)
     {
-        if (depth > 7) return;
+        if (depth > 20) return;
         var present = new HashSet<string>();
         foreach (var c in el.ChildNodes.OfType<XmlElement>())
         {
@@ -296,15 +322,19 @@ public sealed class Extraction
             // SlateRef<string> (textes des quêtes : lettres, infobulles…) : clé "<TKey>.slateRef" si le XML donne un TKey
             // (forme de la traduction officielle, résolue par TKeySystem), sinon "<chemin>.slateRef" ; les références
             // de variables ($asker…) ne sont pas du texte.
-            if (IsSlateRefString(ft))
+            if (IsSlateRefString(ft) || IsSlateRefObject(ft))
             {
-                if (c.ChildNodes.OfType<XmlElement>().Any()) continue;
-                var sv = c.InnerText.Trim();
-                if (sv.StartsWith("$") || !LooksLikeText(sv) || (!sv.Contains(' ') && c.GetAttribute("TKey") == "")) continue;
-                var tkey = c.GetAttribute("TKey");
-                // the game only knows the hardcoded TKeys (Core and DLC quests): elsewhere the real path is required
-                if (tkey != "" && types.GameKnowsTKey(ctx.DefName + "." + tkey)) ctx.AddString(tkey + ".slateRef", c.InnerText, true, "SlateRef");
-                else ctx.AddString(p + ".slateRef", c.InnerText, true, "SlateRef", legacyPath: tkey != "" ? tkey + ".slateRef" : null);
+                AddSlateText(c, p, ctx, objectValue: !IsSlateRefString(ft));
+                continue;
+            }
+            // QuestNode_SubScript / QuestNode_Prefix parms: List<PrefixCapturedVar> read by LoadDataFromXmlCustom, one element
+            // per variable (<customLetterLabel TKey="...">), indexed as a list (TKeySystem.MarkTreatAsList). Official key
+            // "TKey.value.slateRef" (hardcoded mapping to parms.N), else parms.N.value.slateRef.
+            if (IsListType(ft, out var pcv) && pcv.Name == "PrefixCapturedVar")
+            {
+                int n = 0;
+                foreach (var v in c.ChildNodes.OfType<XmlElement>())
+                    AddSlateText(v, p + "." + n++ + ".value", ctx, objectValue: true, tkeySuffix: ".value.slateRef");
                 continue;
             }
             if (IsString(ft))

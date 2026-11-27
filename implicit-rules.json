@@ -19,6 +19,13 @@
     { "type": "PawnKindDef", "list": "lifeStages", "field": "labelFemalePlural", "from": "label|^label" },
 
     { "type": "PawnRelationDef", "field": "labelFemale", "from": "label" },
+    // Traits : le jeu affiche labelFemale pour une colonne (TraitDegreeData.GetLabelFor), sinon label (27/11/2026).
+    { "type": "TraitDef", "list": "degreeDatas", "field": "labelFemale", "from": "label",
+      "note": "forme féminine du trait (absente de l'anglais) : accorder, ou recopier le libellé s'il est invariable" },
+    // Pensées d'opinion : l'onglet Social affiche labelSocial s'il existe, sinon label (Thought.LabelCapSocial).
+    // L'officiel l'ajoute pour accorder au genre (« défiguré(e) » → « défiguré{OTHERPAWN_gender ? : e} ») (27/11/2026).
+    { "type": "ThoughtDef", "list": "stages", "field": "labelSocial", "from": "label", "when": "baseOpinionOffset",
+      "note": "libellé de l'onglet Social (opinion), absent de l'anglais : comme label, accordé au genre ({PAWN_gender ? : e} = celui qui a l'opinion, {OTHERPAWN_gender ? : e} = l'autre) ; recopier label s'il n'y a rien à accorder" },
     { "type": "RoyalTitleDef", "field": "labelFemale", "from": "label" },
     { "type": "FactionDef", "field": "leaderTitleFemale", "from": "leaderTitle", "fallback": "leader" },
     { "type": "HediffDef", "field": "labelNoun", "from": "label" },
@@ -26,8 +33,30 @@
     { "type": "InspirationDef", "field": "beginLetterLabel", "from": "label" },
     { "type": "ThingDef", "path": "stuffProps", "field": "stuffAdjective", "from": "^label" },
 
+    // ScenarioDef.PostLoad copie label et description dans scenario.name / scenario.description avant l'injection des
+    // traductions : la liste des scénarios affiche scenario.name, une traduction de label seule n'y apparaît pas (forme officielle).
+    { "type": "ScenarioDef", "path": "scenario", "field": "name", "from": "^label",
+      "sameText": true,
+      "note": "nom affiché dans la liste des scénarios (ScenarioDef.PostLoad copie label avant l'injection)" },
+    { "type": "ScenarioDef", "path": "scenario", "field": "description", "from": "^description",
+      "sameText": true,
+      "note": "description affichée dans la liste des scénarios (ScenarioDef.PostLoad copie description avant l'injection)" },
+    // SkillDef.PostLoad : label = skillLabel si absent, avant l'injection (forme officielle : les deux clés).
+    { "type": "SkillDef", "field": "label", "from": "skillLabel",
+      "sameText": true,
+      "note": "copie de skillLabel faite par SkillDef.PostLoad avant l'injection" },
+
     // Une arme à un seul verbe : le jeu copie le nom de l'objet dans le libellé du verbe (ThingDef.PostLoad).
     { "type": "ThingDef", "list": "verbs", "onlySingle": true, "field": "label", "from": "^label",
+      "sameText": true,
       "note": "libellé du verbe unique = nom de l'objet (ThingDef.PostLoad)" }
+  ],
+
+  // Champs que le code utilise comme identifiant (non extraits, FieldUsage.cs) mais traduits par choix de l'utilisateur.
+  // Clé : "Namespace.Type.champ" (report.txt, section « Champs ignorés : utilisés comme identifiant »).
+  "translateAnyway": [
+    // Museums : PostExposeData retrouve l'enseigne choisie en comparant ce libellé ; une partie sauvegardée avec le
+    // libellé anglais perd une fois son choix d'enseigne. Sinon le menu reste en anglais (choix du 27/11/2026).
+    { "field": "Museums.SelectableExtraGraphicEntry.label", "note": "menu des enseignes de Museums" }
   ]
 }
