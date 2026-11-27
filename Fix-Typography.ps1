@@ -12,7 +12,8 @@
       - JobDef reportString starts with a lowercase letter (the game inserts it mid-sentence), unless the
         first word is an acronym or a symbol;
       - in rule packs (<li>keyword->text</li>) only the part after "->" is changed.
-    Left untouched: {symbols}, [symbols], times and ratios (10:30), URLs (://), "?!" runs keep a single space.
+    Left untouched: {symbols}, [symbols], times and ratios (10:30), URLs (://), "?!" runs keep a single space,
+    mod names ending in "!" listed in $properNames (Aquariums!, Biomes!).
     Files are rewritten only when something changed, in UTF-8 with BOM.
 
 .PARAMETER Path
@@ -38,10 +39,14 @@ $nb = [string][char]0x00A0
 $lq = [string][char]0x00AB   # opening French quote
 $rq = [string][char]0x00BB   # closing French quote
 
-# {symbols}, [symbols] and URLs are replaced by numbered markers (private-use char) while the text is changed.
+# {symbols}, [symbols], URLs and mod names ending in "!" are replaced by numbered markers (private-use char)
+# while the text is changed. A name written with the space already added ("Aquariums !") is put back as the mod spells it.
 $mark = [string][char]0xE000
+$properNames = @('Aquariums!', 'Biomes!')
+$properNamesPattern = ($properNames | ForEach-Object { [regex]::Escape($_.TrimEnd('!')) + '[   ]?!' }) -join '|'
 function Protect([string]$s, [System.Collections.Generic.List[string]]$tokens) {
-    return [regex]::Replace($s, '\{[^{}]*\}|\[[^\[\]]*\]|https?://\S+', {
+    $s = [regex]::Replace($s, $properNamesPattern, { param($m) return ($m.Value -replace '[   ]', '') })
+    return [regex]::Replace($s, ('\{[^{}]*\}|\[[^\[\]]*\]|https?://\S+|' + $properNamesPattern), {
         param($m) $tokens.Add($m.Value); return $mark + ($tokens.Count - 1) + $mark
     })
 }
