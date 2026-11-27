@@ -47,6 +47,11 @@ Options : `--version 1.6`, `--with id1,id2` (mods optionnels actifs), `--out`, `
 - Héritage XML : les `<li>` d'un enfant s'ajoutent à ceux du parent (comme `XmlInheritance`), sauf `Inherit="False"`.
 - Champ non marqué `[MustTranslate]` : un texte contenant `\n` n'est pas pris pour un chemin de fichier, et un nom de champ texte suffixé (`shortDesc_Direct`, `labelKey_X`) est reconnu (22/11/2026, Research Reinvented : 40 textes manqués).
 - Champs `[Unsaved]` : non extraits (refusés par le jeu, comme `[NoTranslate]`).
+- **Champ non marqué servant d'identifiant** (27/11/2026) : non extrait quand le code compare sa valeur à une donnée non traduite ou à un littéral, s'en sert comme clé de dictionnaire, defName (`GetNamed`), chemin de texture, nom de type ou packageId ; aussi quand sa valeur d'un mot est passée à `Translate()` (clé Keyed) ou que son nom finit par `Key` (`labelKey = PackAnimal`). Cas d'origine : Facial Animation `FaceAdjustmentDef.RightEyeLabel` (« right eye ») comparé à `BodyPartRecord.untranslatedCustomLabel` ; traduit, les visages des colons ne se chargeaient plus (`Sequence contains no elements` dans `EyeballControllerComp.LoadTextures`). Autres cas réels : VEF `TextureVariantOverride.groupName` ↔ `GraphicPart.name`, VPE Mechanitor Sentinel `ModExt_BuffPawnKind.bodyPartLabel`.
+  - Analyse de l'IL des DLL chargées (`FieldUsage.cs`, sans exécution, environ 2 s pour tout le workshop) : la valeur est suivie à travers une variable locale, un champ de closure (lambda) et une petite méthode qui ne fait que renvoyer le champ (`GetRightEyeLabel()`). Une comparaison prend les deux derniers opérandes chargés.
+  - Restent extraits : un champ comparé à un champ `[MustTranslate]` (les deux sont traduits pareil, ex. MVCF `AdditionalVerbProps.label` ↔ `VerbProperties.label`), un champ comparé à lui-même (doublons), les comparaisons dans `ConfigErrors`, `GroupsWith`, `MergeWith`, et `x == ""` / `x == null`.
+  - `report.txt`, section « Champs ignorés : utilisés comme identifiant par le code » (champ, raison, méthode, exemple) : défs du mod seulement ; une exclusion sur la def d'un autre mod modifiée par un patch n'y figure pas. Une traduction déjà saisie pour une clé exclue passe en commentaire `OBSOLETE` à la réextraction.
+  - Les textes de `Languages/English*/DefInjected` du mod et les textes de quête (`slateRef`) ne passent pas par ce filtre.
 - **Textes absents du XML** (désactivables par `--no-implicit`) : défauts fixés par le constructeur (`leaderTitle = "leader"`, lus dans l'IL, champs `[MustTranslate]` seulement) et formes déduites d'un autre champ, listées dans `implicit-rules.json` (`titleFemale`, `labelPlural`/`labelMale`/`labelFemale` des PawnKindDef et de leurs `lifeStages`, `labelNoun`, `stuffAdjective`, libellé du verbe unique d'une arme = nom de l'objet…). Ces entrées portent « Texte absent du XML : … » ; laissées à `TODO`, elles ne sont pas copiées dans un pack.
 - Textes que le mod ne donne que dans `Languages/English*/DefInjected` (absents du XML de ses defs, ex. Simple Improve) : ajoutés avec leur texte anglais (sauf clé indexée en doublon d'un champ déjà extrait).
 - `BackstoryDef` : le XML donne `baseDesc`, mais `PostLoad` le recopie dans `description` avant l'injection des traductions ; la clé extraite est donc `description` (comme la traduction officielle), une clé `baseDesc` ne serait jamais affichée.
@@ -142,6 +147,15 @@ extract.cmd --compare-ref bodlosh.weaponstats --ref 2798150558
 - Clés présentes seulement dans la référence, cherchées dans le mod cible (qui doit être installé) : la def existe dans la version actuelle et a ce champ (son XML ou ses parents abstraits), ou la clé exacte est dans son English DefInjected (`extraction ?` : texte que notre extraction a pu manquer, à vérifier) ; la def existe sans ce champ (`champ absent du mod actuel` : ancienne clé) ; seulement dans d'autres fichiers du mod (`ancienne version`), ou nulle part (`absente du mod` : autre mod couvert par le même pack de traduction, ou clé retirée).
 
 - Valeur `{Clé.SousClé}` entière (réglage XML Extensions, ex. Some More Jobs) : non extraite, c'est le texte saisi par le joueur (24/11/2026).
+
+### Champs servant d'identifiant déjà extraits : `--audit-keys`
+```
+extract.cmd --audit-keys all
+```
+- Pour les extractions antérieures au filtre « champ servant d'identifiant » (voir *Champs et textes*). Une entrée de `out\` ne garde pas le type de son champ : la correspondance se fait par nom de champ, limitée aux types déclarés par le jeu, le mod, ses dépendances et les mods qu'il charge avant lui ; un nom `[MustTranslate]` dans ces assemblies est ignoré (ambigu : `label`, `description`), ainsi que les champs `debug*` et les textes de quête. Ce sont des candidates à vérifier : la réextraction du mod applique la règle exacte.
+- Lecture seule du jeu, du workshop et de `out\` ; écrit `out\audit-keys.csv` (`mod;fichier;cle;anglais;traduction;champ;usage`) et affiche les totaux par champ et les mods dont des entrées sont traduites.
+- Relevé du 27/11/2026 : 73 candidates dans 12 mods, 12 traduites, toutes sans effet (`ScenPart_GameStartDialog.textKey` traduit par lui-même ; Stats `ColumnDef.labelKey` `Damage`/`Range` déjà traduits par l'officiel en Keyed). Les autres sont à `TODO`, donc pas copiées dans le pack.
+- Diagnostic : `--field-usage "<dll1,dll2|@liste.txt>|filtre"` liste les champs utilisés comme identifiant dans ces DLL et la méthode en cause.
 
 ## Limites connues
 

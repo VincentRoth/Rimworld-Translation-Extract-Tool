@@ -236,6 +236,8 @@ public sealed class Extraction
         return v.Contains(' ') || v.Contains('{') || v.Contains('[');
     }
 
+    static readonly Regex Identifier = new(@"^[\w\-\.]+$", RegexOptions.Compiled);
+
     bool Accept(FieldInfoEx f, string value, string path)
     {
         if (f.NoTranslate) return false;
@@ -244,9 +246,32 @@ public sealed class Extraction
         if (Regex.IsMatch(value.Trim(), @"^\{[A-Za-z]\w*(\.\w+)+\}$")) return false;
         if (f.MustTranslate) return true;
         if (f.Field.Name.StartsWith("debug")) return false;
-        if (IncludeUnmarked && LooksLikeText(value, f.Field.Name)) return true;
-        var k = f.Field.DeclaringType?.Name + "." + f.Field.Name;
-        if (curOrigin == CountOrigin) rep.SkippedUnmarked[k] = rep.SkippedUnmarked.GetValueOrDefault(k) + 1;
+        if (!IncludeUnmarked || !LooksLikeText(value, f.Field.Name))
+        {
+            var k = f.Field.DeclaringType?.Name + "." + f.Field.Name;
+            if (curOrigin == CountOrigin) rep.SkippedUnmarked[k] = rep.SkippedUnmarked.GetValueOrDefault(k) + 1;
+            return false;
+        }
+        // Unmarked field used by the code as an identifier (FieldUsageIndex): translating it breaks the lookup
+        // (Facial Animation RightEyeLabel, VEF TextureVariantOverride.groupName). A Keyed key ("labelKey": PackAnimal)
+        // only when the value is one word: a sentence passed to Translate() is shown as is when the key is missing.
+        var oneWord = Identifier.IsMatch(value.Trim());
+        string? reason = null;
+        if (oneWord && Regex.IsMatch(f.Field.Name, "Key$")) reason = "nom en *Key, valeur d'un mot (clé Keyed)";
+        else if (types.LookupUsage(f.Field) is { } uses)
+        {
+            var hard = uses.FirstOrDefault(u => u.Kind is not ("transkey" or "compare-tr"));
+            var tk = uses.FirstOrDefault(u => u.Kind == "transkey");
+            if (hard != null) reason = $"{hard.Kind} : {hard.Where}";
+            else if (tk != null && oneWord) reason = $"transkey : {tk.Where}";
+        }
+        if (reason == null) return true;
+        if (curOrigin == CountOrigin)
+        {
+            var fk = FieldUsageIndex.Key(f.Field);
+            rep.LookupSkipped.TryGetValue(fk, out var cur);
+            rep.LookupSkipped[fk] = (cur.Count + 1, reason, cur.Example ?? path + " = " + value.Trim());
+        }
         return false;
     }
 

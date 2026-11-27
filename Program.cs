@@ -32,6 +32,11 @@ Usage :
   TranslationExtractor --compare-ref <id> --ref <mod de traduction|ID Workshop|dossier>
                        compare notre traduction à une traduction tierce : libellés courts différents,
                        clés que seule la référence traduit (écrit out\<id>\compare-ref.csv)
+  TranslationExtractor --audit-keys <id[,id2]|all>
+                       entrées de out\ dont le champ sert d'identifiant dans le code (comparé, clé de dictionnaire,
+                       clé Keyed...) : candidates à vérifier, puis réextraire le mod (écrit out\audit-keys.csv)
+  TranslationExtractor --field-usage ""<dll1,dll2|@liste.txt>[|filtre]""
+                       diagnostic : champs string utilisés comme identifiant dans ces DLL (+ Assembly-CSharp)
 
 Options :
   --version 1.6        version du jeu visée (défaut : version installée)
@@ -72,6 +77,7 @@ Options :
         bool prefill = false, fresh = false, strict = false, scanDll = false, list = false, skipShipped = false, noImplicit = false; string? dumpDef = null;
         string? fillTm = null, labelTables = null, fillLabels = null, tablesDir = null; string labelFolder = "TerrainDef"; bool tmGlobal = false, relabel = false; int minShare = 3;
         string? fillOfficial = null; bool dryRun = false;
+        string? fieldUsage = null, auditKeys = null;
         string? exportTodo = null, importSheet = null, sheetFile = null, compareRef = null, refArg = null; int batch = 0;
         for (int i = 0; i < args.Length; i++)
         {
@@ -111,6 +117,8 @@ Options :
                 case "--batch": batch = int.Parse(Next()); break;
                 case "--import": importSheet = Next(); break;
                 case "--compare-ref": compareRef = Next(); break;
+                case "--field-usage": fieldUsage = Next(); break;
+                case "--audit-keys": auditKeys = Next(); break;
                 case "--ref": refArg = Next(); break;
                 case "--list-mods": list = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) listFilter = args[++i]; break;
                 case "-h": case "--help": Console.WriteLine(Usage); return 0;
@@ -144,11 +152,22 @@ Options :
         if (workDir != null) env.WorkshopDir = workDir;
         if (version != null) env.Version = version;
         env.Scan();
+        if (auditKeys != null) { GameEnv.AssumeAll = true; return AuditKeys.Run(auditKeys, env, Path.Combine(ToolDir(), "out"), lang, placeholder); }
 
         if (list)
         {
             foreach (var m in env.Index.Where(m => listFilter == null || m.Name.Contains(listFilter, StringComparison.OrdinalIgnoreCase) || m.PackageId.Contains(listFilter, StringComparison.OrdinalIgnoreCase)))
                 Console.WriteLine($"{m.PackageId,-45} {m.Name}   {(m.Official ? "(officiel)" : m.Root)}");
+            return 0;
+        }
+        if (fieldUsage != null)
+        {
+            // diagnostic: identifier usages found in the given DLLs (comma-separated), optional filter after ':'
+            var parts = fieldUsage.Split('|');
+            var dllArg = parts[0].StartsWith("@") ? string.Join(",", File.ReadAllLines(parts[0][1..])) : parts[0];
+            var idx = FieldUsageIndex.Build(dllArg.Split(',', StringSplitOptions.RemoveEmptyEntries).Append(Path.Combine(env.ManagedDir, "Assembly-CSharp.dll")));
+            foreach (var kv in idx.All.Where(k => parts.Length < 2 || k.Key.Contains(parts[1], StringComparison.OrdinalIgnoreCase)).OrderBy(k => k.Key))
+                Console.WriteLine($"{kv.Key}\t{string.Join(" ; ", kv.Value.Select(u => u.Kind + " " + u.Where))}");
             return 0;
         }
         if (compareRef != null)
@@ -417,6 +436,13 @@ Options :
         {
             sb.AppendLine("\n== Mods manquants ==");
             foreach (var s in rep.MissingMods.Distinct()) sb.AppendLine("  " + s);
+        }
+        if (rep.LookupSkipped.Count > 0)
+        {
+            sb.AppendLine("\n== Champs ignorés : utilisés comme identifiant par le code (comparés, clé de dictionnaire, clé Keyed...) ==");
+            sb.AppendLine("   Une traduction casserait la recherche (cas Facial Animation RightEyeLabel). Une traduction déjà saisie passe en OBSOLETE.");
+            foreach (var kv in rep.LookupSkipped.OrderByDescending(k => k.Value.Count))
+                sb.AppendLine($"  {kv.Value.Count,6}  {kv.Key}  [{kv.Value.Reason}]  ex. {kv.Value.Example}");
         }
         if (rep.SkippedUnmarked.Count > 0)
         {

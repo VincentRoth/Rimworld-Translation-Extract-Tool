@@ -22,6 +22,11 @@ public sealed class TypeIndex : IDisposable
     readonly Dictionary<Type, Dictionary<string, FieldInfoEx>> fieldCache = new();
     readonly Dictionary<Type, List<FieldInfoEx>> handleCache = new();
     readonly Report rep;
+    List<string> indexedPaths = new();
+    FieldUsageIndex? usage;
+
+    /// <summary>How the code of the indexed assemblies uses a string field (compared, dictionary key, Keyed key...), null if not.</summary>
+    public IReadOnlyList<FieldUsageIndex.Usage>? LookupUsage(FieldInfo f) => (usage ??= FieldUsageIndex.Build(indexedPaths)).Get(f);
 
     static readonly string[] CorePrefixes = { "Verse", "RimWorld" };
 
@@ -46,6 +51,7 @@ public sealed class TypeIndex : IDisposable
             Path.Combine(managedDir, "Assembly-CSharp-firstpass.dll"),
         };
         toIndex.AddRange(modPaths);
+        indexedPaths = toIndex;
         foreach (var p in toIndex)
         {
             if (!File.Exists(p)) continue;

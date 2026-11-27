@@ -24,6 +24,8 @@ public sealed class Report
     public readonly List<string> UnknownTypes = new();
     public readonly List<string> MissingMods = new();
     public readonly Dictionary<string, int> SkippedUnmarked = new();
+    // unmarked fields the code uses as identifiers (FieldUsageIndex): field -> (count, reason, example)
+    public readonly Dictionary<string, (int Count, string Reason, string? Example)> LookupSkipped = new();
     public readonly List<string> Notes = new();
     public string? ShippedText;
     public void Warn(string s) { if (!Warnings.Contains(s)) Warnings.Add(s); }
